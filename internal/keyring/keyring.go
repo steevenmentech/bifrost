@@ -61,7 +61,7 @@ func Delete(keyType KeyType, keyId string) error {
 
 // buildKey creates a key in the format: "conn:{id}" or "cred:{id}"
 func buildKey(keyType KeyType, keyId string) string {
-	return fmt.Sprintf("%s-%s", keyType, keyId)
+	return fmt.Sprintf("%s:%s", keyType, keyId)
 }
 
 // SetConnectionPassword stores a connection password
