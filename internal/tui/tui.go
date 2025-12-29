@@ -22,13 +22,14 @@ const (
 
 // Model is the main Bubble Tea model
 type Model struct {
-	config *config.Config
-	keys   keys.KeyMap
-	state  ViewState
-	width  int
-	height int
-	ready  bool
-	err    error
+	config        *config.Config
+	keys          keys.KeyMap
+	state         ViewState
+	selectedIndex int
+	width         int
+	height        int
+	ready         bool
+	err           error
 }
 
 // New creates a new TUI model
@@ -60,6 +61,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		// Global keys that work everywhere
 		switch msg.String() {
 		case "ctrl+c", "q":
 			return m, tea.Quit
@@ -67,7 +69,68 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// TODO: Show help
 			return m, nil
 		}
+
+		// View-specific keys
+		switch m.state {
+		case ViewConnections:
+			return m.updateConnectionsList(msg)
+		}
 	}
+
+	return m, nil
+}
+
+// updateConnectionsList handles key presses in the connections list view
+func (m Model) updateConnectionsList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "j", "down":
+		// Move selection down
+		if m.selectedIndex < len(m.config.Connections)-1 {
+			m.selectedIndex++
+		}
+		return m, nil
+
+	case "k", "up":
+		// Move selection up
+		if m.selectedIndex > 0 {
+			m.selectedIndex--
+		}
+		return m, nil
+
+	case "enter", "l", "right":
+		// Select current connection
+		if len(m.config.Connections) > 0 {
+			return m.handleConnectionSelect()
+		}
+		return m, nil
+
+	case "a":
+		// TODO: Add new connection (PYC-17)
+		return m, nil
+
+	case "e":
+		// TODO: Edit selected connection (PYC-17)
+		return m, nil
+
+	case "d":
+		// TODO: Delete selected connection (PYC-17)
+		return m, nil
+	}
+
+	return m, nil
+}
+
+// handleConnectionSelect is called when user presses Enter on a connection
+func (m Model) handleConnectionSelect() (tea.Model, tea.Cmd) {
+	if m.selectedIndex >= len(m.config.Connections) {
+		return m, nil
+	}
+
+	selectedConn := m.config.Connections[m.selectedIndex]
+
+	// For now, just show which connection was selected
+	// In the future, this will show SSH/SFTP options
+	m.err = fmt.Errorf("Selected: %s (SSH/SFTP options coming soon!)", selectedConn.Label)
 
 	return m, nil
 }
@@ -145,8 +208,8 @@ func (m Model) renderConnectionsList() string {
 			line += styles.SubtleStyle.Render(fmt.Sprintf("  (%s)", conn.Host))
 		}
 
-		// Highlight first item for now (we'll add proper selection later)
-		if i == 0 {
+		// Highlight the SELECTED item (not just the first one)
+		if i == m.selectedIndex {
 			line = styles.SelectedStyle.Render(line)
 		} else {
 			line = styles.ItemStyle.Render(line)
@@ -155,7 +218,28 @@ func (m Model) renderConnectionsList() string {
 		content += line + "\n"
 	}
 
+	// Show error message if any (like the "Selected: ..." message)
+	if m.err != nil {
+		content += "\n" + styles.SuccessStyle.Render(fmt.Sprintf("  %v", m.err)) + "\n"
+	}
+
 	return content
+}
+
+// ensureValidSelection makes sure selectedIndex is within bounds
+func (m *Model) ensureValidSelection() {
+	if len(m.config.Connections) == 0 {
+		m.selectedIndex = 0
+		return
+	}
+
+	if m.selectedIndex >= len(m.config.Connections) {
+		m.selectedIndex = len(m.config.Connections) - 1
+	}
+
+	if m.selectedIndex < 0 {
+		m.selectedIndex = 0
+	}
 }
 
 // renderStatusBar renders the bottom status bar
