@@ -24,15 +24,16 @@ const (
 
 // Model is the main Bubble Tea model
 type Model struct {
-	config        *config.Config
-	keys          keys.KeyMap
-	state         ViewState
-	selectedIndex int
-	width         int
-	height        int
-	ready         bool
-	err           error
-	form          *views.ConnectionFormModel
+	config             *config.Config
+	keys               keys.KeyMap
+	state              ViewState
+	selectedIndex      int
+	width              int
+	height             int
+	ready              bool
+	err                error
+	form               *views.ConnectionFormModel
+	selectedConnection *config.Connection
 }
 
 // New creates a new TUI model
@@ -267,11 +268,9 @@ func (m Model) handleConnectionSelect() (tea.Model, tea.Cmd) {
 
 	selectedConn := m.config.Connections[m.selectedIndex]
 
-	// For now, just show which connection was selected
-	// In the future, this will show SSH/SFTP options
-	m.err = fmt.Errorf("Selected: %s (SSH/SFTP options coming soon!)", selectedConn.Label)
-
-	return m, nil
+	// Store the selected connection and quit to start SSH
+	m.selectedConnection = &selectedConn
+	return m, tea.Quit
 }
 
 // View renders the UI
@@ -415,4 +414,9 @@ func (m Model) getViewName() string {
 	default:
 		return "Unknown"
 	}
+}
+
+// GetSelectedConnection returns the connection selected for SSH (if any)
+func (m Model) GetSelectedConnection() *config.Connection {
+	return m.selectedConnection
 }
