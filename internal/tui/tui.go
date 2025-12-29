@@ -6,8 +6,10 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/steevenmentech/bifrost/internal/config"
+	"github.com/steevenmentech/bifrost/internal/keyring"
 	"github.com/steevenmentech/bifrost/internal/tui/keys"
 	"github.com/steevenmentech/bifrost/internal/tui/styles"
+	"github.com/steevenmentech/bifrost/internal/tui/views"
 )
 
 // ViewState represents which view is currently active
@@ -30,6 +32,7 @@ type Model struct {
 	height        int
 	ready         bool
 	err           error
+	form          *views.ConnectionFormModel
 }
 
 // New creates a new TUI model
@@ -64,7 +67,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Global keys that work everywhere
 		switch msg.String() {
 		case "ctrl+c", "q":
-			return m, tea.Quit
+			// Don't quit if in form - let form handle it
+			if m.state != ViewConnectionForm {
+				return m, tea.Quit
+			}
 		case "?":
 			// TODO: Show help
 			return m, nil
@@ -74,8 +80,85 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch m.state {
 		case ViewConnections:
 			return m.updateConnectionsList(msg)
+
+		case ViewConnectionForm:
+			return m.updateConnectionForm(msg)
 		}
 	}
+
+	return m, nil
+}
+
+// updateConnectionForm handles updates for the connection form
+func (m Model) updateConnectionForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.form == nil {
+		m.state = ViewConnections
+		return m, nil
+	}
+
+	// Update the form
+	updatedForm, cmd := m.form.Update(msg)
+	m.form = &updatedForm
+
+	// Check if form was submitted
+	if m.form.IsSubmitted() {
+		return m.handleFormSubmit()
+	}
+
+	// Check if form was cancelled
+	if m.form.IsCancelled() {
+		m.form = nil
+		m.state = ViewConnections
+		return m, nil
+	}
+
+	return m, cmd
+}
+
+// handleFormSubmit saves the connection from the form
+func (m Model) handleFormSubmit() (tea.Model, tea.Cmd) {
+	if m.form == nil {
+		return m, nil
+	}
+
+	// Get connection and password from form
+	conn := m.form.GetConnection()
+	password := m.form.GetPassword()
+
+	// Save password to keyring if provided
+	if password != "" {
+		err := keyring.SetConnectionPassword(conn.ID, password)
+		if err != nil {
+			m.err = fmt.Errorf("failed to save password: %w", err)
+			return m, nil
+		}
+	}
+
+	// Add or update connection in config
+	var err error
+	if m.form.GetMode() == views.FormModeAdd {
+		err = m.config.AddConnection(conn)
+	} else {
+		err = m.config.UpdateConnection(conn)
+	}
+
+	if err != nil {
+		m.err = fmt.Errorf("failed to save connection: %w", err)
+		return m, nil
+	}
+
+	// Reload config to get fresh data
+	cfg, err := config.Load()
+	if err != nil {
+		m.err = fmt.Errorf("failed to reload config: %w", err)
+		return m, nil
+	}
+	m.config = cfg
+
+	// Clear form and return to connections list
+	m.form = nil
+	m.state = ViewConnections
+	m.err = nil
 
 	return m, nil
 }
@@ -105,18 +188,74 @@ func (m Model) updateConnectionsList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case "a":
-		// TODO: Add new connection (PYC-17)
-		return m, nil
+		// Add new connection - show form
+		return m.showAddConnectionForm()
 
 	case "e":
-		// TODO: Edit selected connection (PYC-17)
+		// Edit selected connection
+		if len(m.config.Connections) > 0 {
+			return m.showEditConnectionForm()
+		}
 		return m, nil
 
 	case "d":
-		// TODO: Delete selected connection (PYC-17)
+		// Delete selected connection
+		if len(m.config.Connections) > 0 {
+			return m.handleDeleteConnection()
+		}
 		return m, nil
 	}
 
+	return m, nil
+}
+
+// showAddConnectionForm switches to the connection form view in add mode
+func (m Model) showAddConnectionForm() (tea.Model, tea.Cmd) {
+	form := views.NewConnectionForm(views.FormModeAdd, nil)
+	m.form = &form
+	m.state = ViewConnectionForm
+	m.err = nil
+	return m, form.Init()
+}
+
+// showEditConnectionForm switches to the connection form view in edit mode
+func (m Model) showEditConnectionForm() (tea.Model, tea.Cmd) {
+	if m.selectedIndex >= len(m.config.Connections) {
+		return m, nil
+	}
+
+	conn := &m.config.Connections[m.selectedIndex]
+	form := views.NewConnectionForm(views.FormModeEdit, conn)
+	m.form = &form
+	m.state = ViewConnectionForm
+	m.err = nil
+	return m, form.Init()
+}
+
+// handleDeleteConnection deletes the selected connection
+func (m Model) handleDeleteConnection() (tea.Model, tea.Cmd) {
+	if m.selectedIndex >= len(m.config.Connections) {
+		return m, nil
+	}
+
+	conn := m.config.Connections[m.selectedIndex]
+
+	// Delete password from keyring
+	_ = keyring.DeleteConnectionPassword(conn.ID)
+
+	// Delete from config
+	err := m.config.DeleteConnection(conn.ID)
+	if err != nil {
+		m.err = fmt.Errorf("failed to delete connection: %w", err)
+		return m, nil
+	}
+
+	// Adjust selection
+	if m.selectedIndex >= len(m.config.Connections) && m.selectedIndex > 0 {
+		m.selectedIndex--
+	}
+
+	m.err = nil
 	return m, nil
 }
 
@@ -183,6 +322,11 @@ func (m Model) renderContent() string {
 	switch m.state {
 	case ViewConnections:
 		return m.renderConnectionsList()
+	case ViewConnectionForm:
+		if m.form != nil {
+			return m.form.View()
+		}
+		return "Loading form..."
 	default:
 		return "View not implemented yet"
 	}
