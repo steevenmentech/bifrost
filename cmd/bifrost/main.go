@@ -33,7 +33,7 @@ func main() {
 			os.Exit(1)
 		}
 
-		// Check if user selected a connection to SSH into
+		// Check if user selected a connection
 		tuiModel, ok := finalModel.(tui.Model)
 		if !ok {
 			// Model type assertion failed, exit
@@ -46,23 +46,31 @@ func main() {
 			break
 		}
 
-		// Start SSH session
-		if err := startSSHSession(*selectedConn); err != nil {
-			fmt.Printf("\nSSH Error: %v\n", err)
-			fmt.Println("Press Enter to continue...")
+		// Get connection type (0=SSH, 1=SFTP)
+		connType := tuiModel.GetConnectionType()
+
+		// Start appropriate session
+		if connType == 0 {
+			// SSH
+			if err := startSSHSession(*selectedConn); err != nil {
+				fmt.Printf("\nSSH Error: %v\n", err)
+				fmt.Println("Press Enter to continue...")
+				var input string
+				fmt.Scanln(&input)
+				continue
+			}
+
+			fmt.Println("\nDisconnected from server.")
+			fmt.Println("Press Enter to return to Bifrost...")
 			var input string
 			fmt.Scanln(&input)
-			// Loop back to TUI
-			continue
+		} else {
+			// SFTP (not implemented yet)
+			fmt.Println("\nSFTP functionality coming soon!")
+			fmt.Println("Press Enter to return to Bifrost...")
+			var input string
+			fmt.Scanln(&input)
 		}
-
-		// SSH session completed successfully
-		fmt.Println("\nDisconnected from server.")
-		fmt.Println("Press Enter to return to Bifrost...")
-		var input string
-		fmt.Scanln(&input)
-
-		// Loop back to TUI
 	}
 }
 

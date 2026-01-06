@@ -1,5 +1,10 @@
-  <p align="center">
-    <img src="assets/logo_bifrost.png" alt="Bifrost Logo" width="200"/>
-  </p>
+<p align="center">
+    <img src="assets/bifrost_logo_transparent.png" alt="Bifrost Logo"/>
+</p>
 
 # Bifrost
+
+<p align="center">
+  <strong>SSH/SFTP Manager</strong><br>
+  <em>A modern terminal client for managing your connections</em>
+</p>

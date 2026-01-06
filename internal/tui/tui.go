@@ -18,6 +18,7 @@ type ViewState int
 const (
 	ViewConnections ViewState = iota
 	ViewConnectionForm
+	ViewSelectionMenu
 	ViewSSH
 	ViewSFTP
 )
@@ -34,6 +35,7 @@ type Model struct {
 	err                error
 	form               *views.ConnectionFormModel
 	selectedConnection *config.Connection
+	menuSelection      int // 0=SSH, 1=SFTP
 }
 
 // New creates a new TUI model
@@ -84,6 +86,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case ViewConnectionForm:
 			return m.updateConnectionForm(msg)
+
+		case ViewSelectionMenu:
+			return m.updateSelectionMenu(msg)
 		}
 	}
 
@@ -210,6 +215,38 @@ func (m Model) updateConnectionsList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// updateSelectionMenu handles key presses in the selection menu
+func (m Model) updateSelectionMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "j", "down":
+		// Move selection down
+		if m.menuSelection < 1 {
+			m.menuSelection++
+		}
+		return m, nil
+
+	case "k", "up":
+		// Move selection up
+		if m.menuSelection > 0 {
+			m.menuSelection--
+		}
+		return m, nil
+
+	case "enter", "l", "right":
+		// Confirm selection and quit to start session
+		return m, tea.Quit
+
+	case "esc", "h", "left":
+		// Go back to connections list
+		m.state = ViewConnections
+		m.selectedConnection = nil
+		m.menuSelection = 0
+		return m, nil
+	}
+
+	return m, nil
+}
+
 // showAddConnectionForm switches to the connection form view in add mode
 func (m Model) showAddConnectionForm() (tea.Model, tea.Cmd) {
 	form := views.NewConnectionForm(views.FormModeAdd, nil)
@@ -266,11 +303,11 @@ func (m Model) handleConnectionSelect() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	selectedConn := m.config.Connections[m.selectedIndex]
-
-	// Store the selected connection and quit to start SSH
-	m.selectedConnection = &selectedConn
-	return m, tea.Quit
+	// Store selected connection and show menu
+	m.selectedConnection = &m.config.Connections[m.selectedIndex]
+	m.state = ViewSelectionMenu
+	m.menuSelection = 0 // Default to SSH
+	return m, nil
 }
 
 // View renders the UI
@@ -326,6 +363,8 @@ func (m Model) renderContent() string {
 			return m.form.View()
 		}
 		return "Loading form..."
+	case ViewSelectionMenu:
+		return m.renderSelectionMenu()
 	default:
 		return "View not implemented yet"
 	}
@@ -369,6 +408,41 @@ func (m Model) renderConnectionsList() string {
 	return content
 }
 
+// renderSelectionMenu renders the SSH/SFTP selection menu
+func (m Model) renderSelectionMenu() string {
+	if m.selectedConnection == nil {
+		return "Error: No connection selected"
+	}
+
+	var content string
+	content += "\n\n"
+	content += styles.TitleStyle.Render(fmt.Sprintf("  Connect to: %s", m.selectedConnection.Label)) + "\n\n"
+	content += "  Choose connection type:\n\n"
+
+	// SSH option
+	sshText := "  🔐  SSH Terminal"
+	if m.menuSelection == 0 {
+		sshText = styles.SelectedStyle.Render(sshText)
+	} else {
+		sshText = styles.ItemStyle.Render(sshText)
+	}
+	content += sshText + "\n"
+
+	// SFTP option
+	sftpText := "  📁  SFTP File Browser"
+	if m.menuSelection == 1 {
+		sftpText = styles.SelectedStyle.Render(sftpText)
+	} else {
+		sftpText = styles.ItemStyle.Render(sftpText)
+	}
+	content += sftpText + "\n"
+
+	content += "\n\n"
+	content += styles.SubtleStyle.Render("  ↑↓/jk to navigate • enter to select • esc to cancel")
+
+	return content
+}
+
 // ensureValidSelection makes sure selectedIndex is within bounds
 func (m *Model) ensureValidSelection() {
 	if len(m.config.Connections) == 0 {
@@ -407,6 +481,8 @@ func (m Model) getViewName() string {
 		return "Connections"
 	case ViewConnectionForm:
 		return "Add/Edit Connection"
+	case ViewSelectionMenu:
+		return "Select Mode"
 	case ViewSSH:
 		return "SSH Terminal"
 	case ViewSFTP:
@@ -419,4 +495,9 @@ func (m Model) getViewName() string {
 // GetSelectedConnection returns the connection selected for SSH (if any)
 func (m Model) GetSelectedConnection() *config.Connection {
 	return m.selectedConnection
+}
+
+// GetConnectionType returns whether user selected SSH (0) or SFTP (1)
+func (m Model) GetConnectionType() int {
+	return m.menuSelection
 }
