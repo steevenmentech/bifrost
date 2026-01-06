@@ -7,8 +7,11 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/steevenmentech/bifrost/internal/config"
 	"github.com/steevenmentech/bifrost/internal/keyring"
+	"github.com/steevenmentech/bifrost/internal/sftp"
 	"github.com/steevenmentech/bifrost/internal/ssh"
 	"github.com/steevenmentech/bifrost/internal/tui"
+	"github.com/steevenmentech/bifrost/internal/tui/keys"
+	"github.com/steevenmentech/bifrost/internal/tui/views"
 )
 
 func main() {
@@ -65,8 +68,16 @@ func main() {
 			var input string
 			fmt.Scanln(&input)
 		} else {
-			// SFTP (not implemented yet)
-			fmt.Println("\nSFTP functionality coming soon!")
+			// SFTP
+			if err := startSFTPSession(*selectedConn); err != nil {
+				fmt.Printf("\nSFTP Error: %v\n", err)
+				fmt.Println("Press Enter to continue...")
+				var input string
+				fmt.Scanln(&input)
+				continue
+			}
+
+			fmt.Println("\nDisconnected from server.")
 			fmt.Println("Press Enter to return to Bifrost...")
 			var input string
 			fmt.Scanln(&input)
@@ -94,6 +105,42 @@ func startSSHSession(conn config.Connection) error {
 	// Start interactive session
 	if err := sshClient.StartInteractiveSession(); err != nil {
 		return fmt.Errorf("session error: %w", err)
+	}
+
+	return nil
+}
+
+// startSFTPSession connects to a server via SFTP and shows the file browser
+func startSFTPSession(conn config.Connection) error {
+	// Get password from keyring
+	password, err := keyring.GetConnectionPassword(conn.ID)
+	if err != nil {
+		return fmt.Errorf("failed to get password: %w", err)
+	}
+
+	// Create and connect SFTP client
+	fmt.Printf("\nConnecting to %s@%s:%d via SFTP...\n", conn.Username, conn.Host, conn.Port)
+
+	sftpClient, err := sftp.ConnectFromConfig(conn.Host, conn.Port, conn.Username, password)
+	if err != nil {
+		return fmt.Errorf("failed to connect: %w", err)
+	}
+	defer sftpClient.Close()
+
+	fmt.Println("Connected! Loading SFTP browser...\n")
+
+	// Create SFTP browser model
+	browser := views.NewSFTPBrowser(sftpClient, keys.DefaultKeyMap())
+
+	// Create and run the Bubble Tea program
+	p := tea.NewProgram(
+		browser,
+		tea.WithAltScreen(),
+	)
+
+	// Run the program
+	if _, err := p.Run(); err != nil {
+		return fmt.Errorf("SFTP browser error: %w", err)
 	}
 
 	return nil
