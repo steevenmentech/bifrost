@@ -165,6 +165,76 @@ func (c *Client) Close() error {
 	return nil
 }
 
+// CreateFile creates a new empty file
+func (c *Client) CreateFile(filePath string) error {
+	if c.sftpClient == nil {
+		return fmt.Errorf("not connected")
+	}
+
+	file, err := c.sftpClient.Create(filePath)
+	if err != nil {
+		return fmt.Errorf("failed to create file: %w", err)
+	}
+	defer file.Close()
+
+	return nil
+}
+
+// CreateDirectory creates a new directory
+func (c *Client) CreateDirectory(dirPath string) error {
+	if c.sftpClient == nil {
+		return fmt.Errorf("not connected")
+	}
+
+	err := c.sftpClient.Mkdir(dirPath)
+	if err != nil {
+		return fmt.Errorf("failed to create directory: %w", err)
+	}
+
+	return nil
+}
+
+// Delete removes a file or directory
+func (c *Client) Delete(itemPath string) error {
+	if c.sftpClient == nil {
+		return fmt.Errorf("not connected")
+	}
+
+	// Check if it's a directory
+	info, err := c.sftpClient.Stat(itemPath)
+	if err != nil {
+		return fmt.Errorf("failed to stat item: %w", err)
+	}
+
+	if info.IsDir() {
+		// For directories, use RemoveDirectory
+		err = c.sftpClient.RemoveDirectory(itemPath)
+	} else {
+		// For files, use Remove
+		err = c.sftpClient.Remove(itemPath)
+	}
+
+	if err != nil {
+		return fmt.Errorf("failed to delete: %w", err)
+	}
+
+	return nil
+}
+
+// Rename renames or moves a file/directory
+func (c *Client) Rename(oldPath, newPath string) error {
+	if c.sftpClient == nil {
+		return fmt.Errorf("not connected")
+	}
+
+	err := c.sftpClient.Rename(oldPath, newPath)
+	if err != nil {
+		return fmt.Errorf("failed to rename: %w", err)
+	}
+
+	return nil
+}
+
 // ConnectFromConfig creates and connects an SFTP client using connection details
 func ConnectFromConfig(host string, port int, username, password string) (*Client, error) {
 	client, err := NewClient(host, port, username, password)
