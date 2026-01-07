@@ -39,6 +39,7 @@ type SFTPBrowserModel struct {
 	width         int
 	height        int
 	keys          keys.KeyMap
+	fileToEdit    string // Path of file to edit (when quitting to edit)
 }
 
 func NewSFTPBrowser(client *sftp.Client, keymap keys.KeyMap) *SFTPBrowserModel {
@@ -170,6 +171,14 @@ func (m *SFTPBrowserModel) updateBrowsing(msg tea.Msg) (tea.Model, tea.Cmd) {
 				fullPath := path.Join(m.currentPath, m.files[m.selectedIndex].Name)
 				m.copyToClipboard(fullPath)
 				m.successMsg = "Path copied to clipboard"
+			}
+		case msg.String() == "e": // Edit file
+			if len(m.files) > 0 && m.selectedIndex < len(m.files) {
+				if !m.files[m.selectedIndex].IsDir {
+					// Mark file for editing and quit to let main handle it
+					m.fileToEdit = path.Join(m.currentPath, m.files[m.selectedIndex].Name)
+					return m, tea.Quit
+				}
 			}
 		case key.Matches(msg, m.keys.Quit):
 			return m, tea.Quit
@@ -383,6 +392,11 @@ func (m *SFTPBrowserModel) copyToClipboard(text string) {
 	}
 }
 
+// GetFileToEdit returns the path of the file to edit (if any)
+func (m *SFTPBrowserModel) GetFileToEdit() string {
+	return m.fileToEdit
+}
+
 func (m *SFTPBrowserModel) View() string {
 	switch m.state {
 	case GoToPathState:
@@ -486,7 +500,7 @@ func (m *SFTPBrowserModel) viewBrowsing() string {
 	// Help text
 	s.WriteString("\n")
 	helpText := "  j/k: up/down • h: parent • l/enter: open • g: go to path • ~: home • .: toggle hidden\n"
-	helpText += "  n: new file • N: new dir • d: delete • r: rename • y: copy path • q: quit"
+	helpText += "  n: new file • N: new dir • d: delete • r: rename • e: edit • y: copy path • q: quit"
 	s.WriteString(styles.SubtleStyle.Render(helpText) + "\n")
 
 	return s.String()

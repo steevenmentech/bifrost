@@ -2,13 +2,38 @@ package sftp
 
 import (
 	"fmt"
+	"io"
 	"io/fs"
+	"os"
 	"path"
 	"time"
 
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
 )
+
+// wrapSFTPError wraps SFTP errors with more descriptive messages
+func wrapSFTPError(err error, context string) error {
+	if err == nil {
+		return nil
+	}
+
+	// Check if it's an SFTP status error
+	if statusErr, ok := err.(*sftp.StatusError); ok {
+		switch statusErr.Code {
+		case 4: // SSH_FX_FAILURE
+			return fmt.Errorf("%s: server error (disk full, permissions, or other server issue)", context)
+		case 3: // SSH_FX_PERMISSION_DENIED
+			return fmt.Errorf("%s: permission denied", context)
+		case 2: // SSH_FX_NO_SUCH_FILE
+			return fmt.Errorf("%s: file or directory not found", context)
+		case 14: // SSH_FX_NO_SPACE_ON_FILESYSTEM
+			return fmt.Errorf("%s: no space left on server", context)
+		}
+	}
+
+	return fmt.Errorf("%s: %w", context, err)
+}
 
 // Client represents a SFTP client
 type Client struct {
@@ -230,6 +255,74 @@ func (c *Client) Rename(oldPath, newPath string) error {
 	err := c.sftpClient.Rename(oldPath, newPath)
 	if err != nil {
 		return fmt.Errorf("failed to rename: %w", err)
+	}
+
+	return nil
+}
+
+// DownloadFile downloads a file from the remote server to local path
+func (c *Client) DownloadFile(remotePath, localPath string) error {
+	if c.sftpClient == nil {
+		return fmt.Errorf("not connected")
+	}
+
+	// Open remote file
+	remoteFile, err := c.sftpClient.Open(remotePath)
+	if err != nil {
+		return wrapSFTPError(err, "failed to open remote file")
+	}
+	defer remoteFile.Close()
+
+	// Create local file
+	localFile, err := os.Create(localPath)
+	if err != nil {
+		return fmt.Errorf("failed to create local file: %w", err)
+	}
+
+	// Copy contents
+	_, err = io.Copy(localFile, remoteFile)
+	if err != nil {
+		localFile.Close()
+		return fmt.Errorf("failed to download file: %w", err)
+	}
+
+	// Close explicitly to catch any errors
+	if err := localFile.Close(); err != nil {
+		return fmt.Errorf("failed to close local file: %w", err)
+	}
+
+	return nil
+}
+
+// UploadFile uploads a file from local path to the remote server
+func (c *Client) UploadFile(localPath, remotePath string) error {
+	if c.sftpClient == nil {
+		return fmt.Errorf("not connected")
+	}
+
+	// Open local file
+	localFile, err := os.Open(localPath)
+	if err != nil {
+		return fmt.Errorf("failed to open local file: %w", err)
+	}
+	defer localFile.Close()
+
+	// Create remote file
+	remoteFile, err := c.sftpClient.Create(remotePath)
+	if err != nil {
+		return wrapSFTPError(err, "failed to create remote file")
+	}
+
+	// Copy contents using io.Copy (uses ReadFrom internally for better performance)
+	_, err = io.Copy(remoteFile, localFile)
+	if err != nil {
+		remoteFile.Close()
+		return wrapSFTPError(err, "failed to write to remote file")
+	}
+
+	// Close to flush buffers
+	if err := remoteFile.Close(); err != nil {
+		return wrapSFTPError(err, "failed to close remote file")
 	}
 
 	return nil
