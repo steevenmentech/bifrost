@@ -19,6 +19,7 @@ const (
 	ViewConnections ViewState = iota
 	ViewConnectionForm
 	ViewSelectionMenu
+	ViewCredentials
 	ViewSSH
 	ViewSFTP
 )
@@ -34,6 +35,7 @@ type Model struct {
 	ready              bool
 	err                error
 	form               *views.ConnectionFormModel
+	credentialsManager *views.CredentialsManagerModel
 	selectedConnection *config.Connection
 	menuSelection      int // 0=SSH, 1=SFTP
 }
@@ -70,8 +72,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Global keys that work everywhere
 		switch msg.String() {
 		case "ctrl+c", "q":
-			// Don't quit if in form - let form handle it
-			if m.state != ViewConnectionForm {
+			// Don't quit if in form or credentials view - let them handle it
+			if m.state != ViewConnectionForm && m.state != ViewCredentials {
 				return m, tea.Quit
 			}
 		case "?":
@@ -89,6 +91,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case ViewSelectionMenu:
 			return m.updateSelectionMenu(msg)
+
+		case ViewCredentials:
+			return m.updateCredentialsManager(msg)
 		}
 	}
 
@@ -210,9 +215,44 @@ func (m Model) updateConnectionsList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m.handleDeleteConnection()
 		}
 		return m, nil
+
+	case "c":
+		// Open credentials manager
+		return m.showCredentialsManager()
 	}
 
 	return m, nil
+}
+
+// updateCredentialsManager handles updates for the credentials manager
+func (m Model) updateCredentialsManager(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.credentialsManager == nil {
+		m.state = ViewConnections
+		return m, nil
+	}
+
+	// Update the credentials manager
+	updatedManager, cmd := m.credentialsManager.Update(msg)
+	m.credentialsManager = updatedManager
+
+	// Check if done
+	if m.credentialsManager.IsDone() {
+		// Get updated config
+		m.config = m.credentialsManager.GetConfig()
+		m.credentialsManager = nil
+		m.state = ViewConnections
+		return m, nil
+	}
+
+	return m, cmd
+}
+
+// showCredentialsManager switches to the credentials manager view
+func (m Model) showCredentialsManager() (tea.Model, tea.Cmd) {
+	manager := views.NewCredentialsManager(m.config, m.keys)
+	m.credentialsManager = manager
+	m.state = ViewCredentials
+	return m, manager.Init()
 }
 
 // updateSelectionMenu handles key presses in the selection menu
@@ -249,7 +289,7 @@ func (m Model) updateSelectionMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // showAddConnectionForm switches to the connection form view in add mode
 func (m Model) showAddConnectionForm() (tea.Model, tea.Cmd) {
-	form := views.NewConnectionForm(views.FormModeAdd, nil)
+	form := views.NewConnectionFormWithCredentials(views.FormModeAdd, nil, m.config.Credentials)
 	m.form = &form
 	m.state = ViewConnectionForm
 	m.err = nil
@@ -263,7 +303,7 @@ func (m Model) showEditConnectionForm() (tea.Model, tea.Cmd) {
 	}
 
 	conn := &m.config.Connections[m.selectedIndex]
-	form := views.NewConnectionForm(views.FormModeEdit, conn)
+	form := views.NewConnectionFormWithCredentials(views.FormModeEdit, conn, m.config.Credentials)
 	m.form = &form
 	m.state = ViewConnectionForm
 	m.err = nil
@@ -365,6 +405,11 @@ func (m Model) renderContent() string {
 		return "Loading form..."
 	case ViewSelectionMenu:
 		return m.renderSelectionMenu()
+	case ViewCredentials:
+		if m.credentialsManager != nil {
+			return m.credentialsManager.View()
+		}
+		return "Loading credentials..."
 	default:
 		return "View not implemented yet"
 	}
@@ -461,7 +506,7 @@ func (m *Model) ensureValidSelection() {
 
 // renderStatusBar renders the bottom status bar
 func (m Model) renderStatusBar() string {
-	helpText := "↑↓/jk navigate • enter select • a add • e edit • d delete • q quit • ? help"
+	helpText := "↑↓/jk navigate • enter select • a add • e edit • d delete • c credentials • q quit"
 
 	statusText := styles.HelpStyle.Render(helpText)
 
@@ -483,6 +528,8 @@ func (m Model) getViewName() string {
 		return "Add/Edit Connection"
 	case ViewSelectionMenu:
 		return "Select Mode"
+	case ViewCredentials:
+		return "Credentials"
 	case ViewSSH:
 		return "SSH Terminal"
 	case ViewSFTP:

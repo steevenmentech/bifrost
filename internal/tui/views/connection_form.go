@@ -28,6 +28,8 @@ const (
 	FieldLabel FormField = iota
 	FieldHost
 	FieldPort
+	FieldAuthType
+	FieldCredential
 	FieldUsername
 	FieldPassword
 	FieldIcon
@@ -47,6 +49,14 @@ type ConnectionFormModel struct {
 	usernameInput textinput.Model
 	passwordInput textinput.Model
 
+	// Auth type selection (0=password, 1=credential)
+	authTypeIndex int
+	authTypes     []string
+
+	// Credential selection
+	credentials     []config.Credential
+	credentialIndex int
+
 	// Icon selection
 	iconIndex  int
 	icons      []string
@@ -64,11 +74,18 @@ type ConnectionFormModel struct {
 
 // NewConnectionForm creates a new connection form
 func NewConnectionForm(mode FormMode, conn *config.Connection) ConnectionFormModel {
+	return NewConnectionFormWithCredentials(mode, conn, nil)
+}
+
+// NewConnectionFormWithCredentials creates a new connection form with credentials list
+func NewConnectionFormWithCredentials(mode FormMode, conn *config.Connection, credentials []config.Credential) ConnectionFormModel {
 	m := ConnectionFormModel{
-		mode:       mode,
-		icons:      []string{"", "", "", "🖥️"},
-		iconLabels: []string{"Apple", "Linux", "Windows", "Server"},
-		iconIndex:  3, // Default to server icon
+		mode:        mode,
+		icons:       []string{"", "", "", "🖥️"},
+		iconLabels:  []string{"Apple", "Linux", "Windows", "Server"},
+		iconIndex:   3,
+		authTypes:   []string{"Password", "Credential"},
+		credentials: credentials,
 	}
 
 	// Initialize text inputs
@@ -111,10 +128,9 @@ func NewConnectionForm(mode FormMode, conn *config.Connection) ConnectionFormMod
 	// If editing, populate with existing values
 	if mode == FormModeEdit && conn != nil {
 		m.connID = conn.ID
-		m.inputs[FieldLabel].SetValue(conn.Label)
-		m.inputs[FieldHost].SetValue(conn.Host)
-		m.inputs[FieldPort].SetValue(strconv.Itoa(conn.Port))
-		m.inputs[FieldUsername].SetValue(conn.Username)
+		m.inputs[0].SetValue(conn.Label)
+		m.inputs[1].SetValue(conn.Host)
+		m.inputs[2].SetValue(strconv.Itoa(conn.Port))
 
 		// Find icon index
 		for i, icon := range m.icons {
@@ -124,11 +140,23 @@ func NewConnectionForm(mode FormMode, conn *config.Connection) ConnectionFormMod
 			}
 		}
 
-		// Load password from keyring
-		if conn.AuthType == "password" {
+		// Set auth type
+		if conn.AuthType == "credential" {
+			m.authTypeIndex = 1
+			// Find credential index
+			for i, cred := range m.credentials {
+				if cred.ID == conn.CredentialID {
+					m.credentialIndex = i
+					break
+				}
+			}
+		} else {
+			m.authTypeIndex = 0
+			m.inputs[3].SetValue(conn.Username)
+			// Load password from keyring
 			password, err := keyring.GetConnectionPassword(conn.ID)
 			if err == nil {
-				m.inputs[FieldPassword].SetValue(password)
+				m.inputs[4].SetValue(password)
 			}
 		}
 	}
@@ -163,10 +191,26 @@ func (m ConnectionFormModel) Update(msg tea.Msg) (ConnectionFormModel, tea.Cmd) 
 				m.prevIcon()
 				return m, nil
 			}
+			if m.focusIndex == int(FieldAuthType) {
+				m.prevAuthType()
+				return m, nil
+			}
+			if m.focusIndex == int(FieldCredential) {
+				m.prevCredential()
+				return m, nil
+			}
 
 		case "right":
 			if m.focusIndex == int(FieldIcon) {
 				m.nextIcon()
+				return m, nil
+			}
+			if m.focusIndex == int(FieldAuthType) {
+				m.nextAuthType()
+				return m, nil
+			}
+			if m.focusIndex == int(FieldCredential) {
+				m.nextCredential()
 				return m, nil
 			}
 
@@ -183,14 +227,47 @@ func (m ConnectionFormModel) Update(msg tea.Msg) (ConnectionFormModel, tea.Cmd) 
 		}
 	}
 
-	// Update the focused input
-	if m.focusIndex < len(m.inputs) {
-		var cmd tea.Cmd
-		m.inputs[m.focusIndex], cmd = m.inputs[m.focusIndex].Update(msg)
-		return m, cmd
+	// Update the focused input (only for text inputs)
+	if m.isTextInputField(m.focusIndex) {
+		inputIdx := m.getInputIndex(m.focusIndex)
+		if inputIdx >= 0 && inputIdx < len(m.inputs) {
+			var cmd tea.Cmd
+			m.inputs[inputIdx], cmd = m.inputs[inputIdx].Update(msg)
+			return m, cmd
+		}
 	}
 
 	return m, nil
+}
+
+// isTextInputField returns whether the field is a text input
+func (m ConnectionFormModel) isTextInputField(field int) bool {
+	switch FormField(field) {
+	case FieldLabel, FieldHost, FieldPort:
+		return true
+	case FieldUsername, FieldPassword:
+		return m.authTypeIndex == 0 // Only when using password auth
+	default:
+		return false
+	}
+}
+
+// getInputIndex returns the index in the inputs slice for a field
+func (m ConnectionFormModel) getInputIndex(field int) int {
+	switch FormField(field) {
+	case FieldLabel:
+		return 0
+	case FieldHost:
+		return 1
+	case FieldPort:
+		return 2
+	case FieldUsername:
+		return 3
+	case FieldPassword:
+		return 4
+	default:
+		return -1
+	}
 }
 
 // View renders the form
@@ -209,11 +286,21 @@ func (m ConnectionFormModel) View() string {
 	s += styles.TitleStyle.Render(title) + "\n\n"
 
 	// Form fields
-	s += m.renderField(FieldLabel, "Label:", m.inputs[FieldLabel].View())
-	s += m.renderField(FieldHost, "Host:", m.inputs[FieldHost].View())
-	s += m.renderField(FieldPort, "Port:", m.inputs[FieldPort].View())
-	s += m.renderField(FieldUsername, "Username:", m.inputs[FieldUsername].View())
-	s += m.renderField(FieldPassword, "Password:", m.inputs[FieldPassword].View())
+	s += m.renderField(FieldLabel, "Label:", m.inputs[0].View())
+	s += m.renderField(FieldHost, "Host:", m.inputs[1].View())
+	s += m.renderField(FieldPort, "Port:", m.inputs[2].View())
+	s += m.renderAuthTypeField()
+
+	// Show credential selector or username/password based on auth type
+	if m.authTypeIndex == 1 {
+		// Credential mode
+		s += m.renderCredentialField()
+	} else {
+		// Password mode
+		s += m.renderField(FieldUsername, "Username:", m.inputs[3].View())
+		s += m.renderField(FieldPassword, "Password:", m.inputs[4].View())
+	}
+
 	s += m.renderIconField()
 
 	// Buttons
@@ -222,7 +309,7 @@ func (m ConnectionFormModel) View() string {
 
 	// Help text
 	s += "\n\n"
-	s += styles.HelpStyle.Render("tab/shift+tab navigate • enter submit • esc cancel")
+	s += styles.HelpStyle.Render("tab/↑↓ navigate • ←→ select • enter submit • esc cancel")
 
 	// Error message
 	if m.err != nil {
@@ -245,6 +332,51 @@ func (m ConnectionFormModel) renderField(field FormField, label, input string) s
 	return fmt.Sprintf("  %s %s\n", labelText, input)
 }
 
+// renderAuthTypeField renders the auth type selection field
+func (m ConnectionFormModel) renderAuthTypeField() string {
+	label := "Auth:"
+	if m.focusIndex == int(FieldAuthType) {
+		label = styles.SelectedStyle.Render(label)
+	} else {
+		label = lipgloss.NewStyle().Width(12).Render(label)
+	}
+
+	var types string
+	for i, authType := range m.authTypes {
+		text := fmt.Sprintf(" %s ", authType)
+		if i == m.authTypeIndex {
+			text = styles.SelectedStyle.Render(text)
+		} else {
+			text = styles.ItemStyle.Render(text)
+		}
+		types += text
+	}
+
+	return fmt.Sprintf("  %s %s\n", label, types)
+}
+
+// renderCredentialField renders the credential selection field
+func (m ConnectionFormModel) renderCredentialField() string {
+	label := "Credential:"
+	if m.focusIndex == int(FieldCredential) {
+		label = styles.SelectedStyle.Render(label)
+	} else {
+		label = lipgloss.NewStyle().Width(12).Render(label)
+	}
+
+	if len(m.credentials) == 0 {
+		return fmt.Sprintf("  %s %s\n", label, styles.SubtleStyle.Render("(no credentials - press 'c' to add)"))
+	}
+
+	cred := m.credentials[m.credentialIndex]
+	credText := fmt.Sprintf("← %s (%s) →", cred.Label, cred.Username)
+	if m.focusIndex == int(FieldCredential) {
+		credText = styles.SelectedStyle.Render(credText)
+	}
+
+	return fmt.Sprintf("  %s %s\n", label, credText)
+}
+
 // renderIconField renders the icon selection field
 func (m ConnectionFormModel) renderIconField() string {
 	label := "Icon:"
@@ -254,7 +386,6 @@ func (m ConnectionFormModel) renderIconField() string {
 		label = lipgloss.NewStyle().Width(12).Render(label)
 	}
 
-	// Show all icons with current one highlighted
 	var icons string
 	for i, icon := range m.icons {
 		iconText := fmt.Sprintf(" %s %s ", icon, m.iconLabels[i])
@@ -291,37 +422,75 @@ func (m ConnectionFormModel) renderButtons() string {
 
 // nextField moves to the next field
 func (m *ConnectionFormModel) nextField() {
-	// Only blur if current focus is on a text input
-	if m.focusIndex < len(m.inputs) {
-		m.inputs[m.focusIndex].Blur()
+	// Blur current text input if applicable
+	if m.isTextInputField(m.focusIndex) {
+		inputIdx := m.getInputIndex(m.focusIndex)
+		if inputIdx >= 0 {
+			m.inputs[inputIdx].Blur()
+		}
 	}
 
 	m.focusIndex++
+
+	// Skip credential field if using password auth
+	if m.focusIndex == int(FieldCredential) && m.authTypeIndex == 0 {
+		m.focusIndex++
+	}
+
+	// Skip username/password fields if using credential auth
+	if m.authTypeIndex == 1 {
+		if m.focusIndex == int(FieldUsername) || m.focusIndex == int(FieldPassword) {
+			m.focusIndex = int(FieldIcon)
+		}
+	}
+
 	if m.focusIndex > int(FieldCancel) {
 		m.focusIndex = 0
 	}
 
-	// Only focus if new focus is on a text input
-	if m.focusIndex < len(m.inputs) {
-		m.inputs[m.focusIndex].Focus()
+	// Focus new text input if applicable
+	if m.isTextInputField(m.focusIndex) {
+		inputIdx := m.getInputIndex(m.focusIndex)
+		if inputIdx >= 0 {
+			m.inputs[inputIdx].Focus()
+		}
 	}
 }
 
 // prevField moves to the previous field
 func (m *ConnectionFormModel) prevField() {
-	// Only blur if current focus is on a text input
-	if m.focusIndex < len(m.inputs) {
-		m.inputs[m.focusIndex].Blur()
+	// Blur current text input if applicable
+	if m.isTextInputField(m.focusIndex) {
+		inputIdx := m.getInputIndex(m.focusIndex)
+		if inputIdx >= 0 {
+			m.inputs[inputIdx].Blur()
+		}
 	}
 
 	m.focusIndex--
+
+	// Skip username/password fields if using credential auth
+	if m.authTypeIndex == 1 {
+		if m.focusIndex == int(FieldPassword) || m.focusIndex == int(FieldUsername) {
+			m.focusIndex = int(FieldCredential)
+		}
+	}
+
+	// Skip credential field if using password auth
+	if m.focusIndex == int(FieldCredential) && m.authTypeIndex == 0 {
+		m.focusIndex--
+	}
+
 	if m.focusIndex < 0 {
 		m.focusIndex = int(FieldCancel)
 	}
 
-	// Only focus if new focus is on a text input
-	if m.focusIndex < len(m.inputs) {
-		m.inputs[m.focusIndex].Focus()
+	// Focus new text input if applicable
+	if m.isTextInputField(m.focusIndex) {
+		inputIdx := m.getInputIndex(m.focusIndex)
+		if inputIdx >= 0 {
+			m.inputs[inputIdx].Focus()
+		}
 	}
 }
 
@@ -341,27 +510,71 @@ func (m *ConnectionFormModel) prevIcon() {
 	}
 }
 
+// nextAuthType cycles to the next auth type
+func (m *ConnectionFormModel) nextAuthType() {
+	m.authTypeIndex++
+	if m.authTypeIndex >= len(m.authTypes) {
+		m.authTypeIndex = 0
+	}
+}
+
+// prevAuthType cycles to the previous auth type
+func (m *ConnectionFormModel) prevAuthType() {
+	m.authTypeIndex--
+	if m.authTypeIndex < 0 {
+		m.authTypeIndex = len(m.authTypes) - 1
+	}
+}
+
+// nextCredential cycles to the next credential
+func (m *ConnectionFormModel) nextCredential() {
+	if len(m.credentials) == 0 {
+		return
+	}
+	m.credentialIndex++
+	if m.credentialIndex >= len(m.credentials) {
+		m.credentialIndex = 0
+	}
+}
+
+// prevCredential cycles to the previous credential
+func (m *ConnectionFormModel) prevCredential() {
+	if len(m.credentials) == 0 {
+		return
+	}
+	m.credentialIndex--
+	if m.credentialIndex < 0 {
+		m.credentialIndex = len(m.credentials) - 1
+	}
+}
+
 // submit validates and submits the form
 func (m ConnectionFormModel) submit() (ConnectionFormModel, tea.Cmd) {
 	// Validate
-	if m.inputs[FieldLabel].Value() == "" {
+	if m.inputs[0].Value() == "" {
 		m.err = fmt.Errorf("label is required")
 		return m, nil
 	}
-	if m.inputs[FieldHost].Value() == "" {
+	if m.inputs[1].Value() == "" {
 		m.err = fmt.Errorf("host is required")
 		return m, nil
 	}
 
 	// Parse port
 	port := 22
-	if m.inputs[FieldPort].Value() != "" {
+	if m.inputs[2].Value() != "" {
 		var err error
-		port, err = strconv.Atoi(m.inputs[FieldPort].Value())
+		port, err = strconv.Atoi(m.inputs[2].Value())
 		if err != nil || port < 1 || port > 65535 {
 			m.err = fmt.Errorf("invalid port number")
 			return m, nil
 		}
+	}
+
+	// Validate credential selection
+	if m.authTypeIndex == 1 && len(m.credentials) == 0 {
+		m.err = fmt.Errorf("no credentials available - create one first with 'c'")
+		return m, nil
 	}
 
 	m.submitted = true
@@ -371,8 +584,8 @@ func (m ConnectionFormModel) submit() (ConnectionFormModel, tea.Cmd) {
 // GetConnection returns the connection from form values
 func (m ConnectionFormModel) GetConnection() config.Connection {
 	port := 22
-	if m.inputs[FieldPort].Value() != "" {
-		port, _ = strconv.Atoi(m.inputs[FieldPort].Value())
+	if m.inputs[2].Value() != "" {
+		port, _ = strconv.Atoi(m.inputs[2].Value())
 	}
 
 	connID := m.connID
@@ -380,20 +593,35 @@ func (m ConnectionFormModel) GetConnection() config.Connection {
 		connID = uuid.New().String()
 	}
 
-	return config.Connection{
-		ID:       connID,
-		Label:    m.inputs[FieldLabel].Value(),
-		Host:     m.inputs[FieldHost].Value(),
-		Port:     port,
-		Username: m.inputs[FieldUsername].Value(),
-		Icon:     m.icons[m.iconIndex],
-		AuthType: "password",
+	conn := config.Connection{
+		ID:    connID,
+		Label: m.inputs[0].Value(),
+		Host:  m.inputs[1].Value(),
+		Port:  port,
+		Icon:  m.icons[m.iconIndex],
 	}
+
+	if m.authTypeIndex == 1 && len(m.credentials) > 0 {
+		// Using credential
+		conn.AuthType = "credential"
+		conn.CredentialID = m.credentials[m.credentialIndex].ID
+		conn.Username = m.credentials[m.credentialIndex].Username
+	} else {
+		// Using password
+		conn.AuthType = "password"
+		conn.Username = m.inputs[3].Value()
+	}
+
+	return conn
 }
 
 // GetPassword returns the password from the form
 func (m ConnectionFormModel) GetPassword() string {
-	return m.inputs[FieldPassword].Value()
+	if m.authTypeIndex == 1 {
+		// Using credential - no password to return
+		return ""
+	}
+	return m.inputs[4].Value()
 }
 
 // IsSubmitted returns whether the form was submitted
@@ -409,4 +637,9 @@ func (m ConnectionFormModel) IsCancelled() bool {
 // GetMode returns the form mode (add or edit)
 func (m ConnectionFormModel) GetMode() FormMode {
 	return m.mode
+}
+
+// IsUsingCredential returns whether the form is set to use credential auth
+func (m ConnectionFormModel) IsUsingCredential() bool {
+	return m.authTypeIndex == 1
 }

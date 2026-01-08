@@ -87,10 +87,20 @@ func main() {
 	}
 }
 
+// getConnectionPassword retrieves password based on auth type
+func getConnectionPassword(conn config.Connection) (string, error) {
+	if conn.AuthType == "credential" && conn.CredentialID != "" {
+		// Get password from credential
+		return keyring.GetCredentialPassword(conn.CredentialID)
+	}
+	// Get password from connection
+	return keyring.GetConnectionPassword(conn.ID)
+}
+
 // startSSHSession connects to a server via SSH
 func startSSHSession(conn config.Connection) error {
-	// Get password from keyring
-	password, err := keyring.GetConnectionPassword(conn.ID)
+	// Get password based on auth type
+	password, err := getConnectionPassword(conn)
 	if err != nil {
 		return fmt.Errorf("failed to get password: %w", err)
 	}
@@ -114,8 +124,8 @@ func startSSHSession(conn config.Connection) error {
 
 // startSFTPSession connects to a server via SFTP and shows the file browser
 func startSFTPSession(conn config.Connection) error {
-	// Get password from keyring
-	password, err := keyring.GetConnectionPassword(conn.ID)
+	// Get password based on auth type
+	password, err := getConnectionPassword(conn)
 	if err != nil {
 		return fmt.Errorf("failed to get password: %w", err)
 	}

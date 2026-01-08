@@ -164,3 +164,45 @@ func (cfg *Config) GetConnection(id string) (*Connection, error) {
 	}
 	return nil, fmt.Errorf("connection with ID %s not found", id)
 }
+
+// AddCredential adds a new credential to the configuration
+func (cfg *Config) AddCredential(cred Credential) error {
+	if cred.ID == "" {
+		cred.ID = uuid.New().String()
+	}
+
+	cfg.Credentials = append(cfg.Credentials, cred)
+	return cfg.Save()
+}
+
+// DeleteCredential removes a credential from the configuration by ID
+func (cfg *Config) DeleteCredential(id string) error {
+	for i, cred := range cfg.Credentials {
+		if cred.ID == id {
+			cfg.Credentials = append(cfg.Credentials[:i], cfg.Credentials[i+1:]...)
+			return cfg.Save()
+		}
+	}
+	return fmt.Errorf("credential with ID %s not found", id)
+}
+
+// UpdateCredential updates an existing credential in the configuration
+func (cfg *Config) UpdateCredential(updated Credential) error {
+	for i, cred := range cfg.Credentials {
+		if cred.ID == updated.ID {
+			cfg.Credentials[i] = updated
+			return cfg.Save()
+		}
+	}
+	return fmt.Errorf("credential with ID %s not found", updated.ID)
+}
+
+// GetCredential retrieves a credential by ID
+func (cfg *Config) GetCredential(id string) (*Credential, error) {
+	for _, cred := range cfg.Credentials {
+		if cred.ID == id {
+			return &cred, nil
+		}
+	}
+	return nil, fmt.Errorf("credential with ID %s not found", id)
+}
