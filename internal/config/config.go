@@ -12,39 +12,39 @@ import (
 
 // Config represents the application configuration.
 type Config struct {
-	Version     int          `yaml:"version"`
-	Settings    Settings     `yaml:"settings"`
-	Connections []Connection `yaml:"connections"`
-	Credentials []Credential `yaml:"credentials"`
+	Version     int          `yaml:"version" mapstructure:"version"`
+	Settings    Settings     `yaml:"settings" mapstructure:"settings"`
+	Connections []Connection `yaml:"connections" mapstructure:"connections"`
+	Credentials []Credential `yaml:"credentials" mapstructure:"credentials"`
 }
 
 // Settings contains user preferences and application settings.
 type Settings struct {
-	Editor          string `yaml:"editor"`
-	Theme           string `yaml:"theme"`
-	ShowHiddenFiles string `yaml:"show_hidden_files"`
-	ConfirmDelete   string `yaml:"confirm_delete"`
-	DefaultPort     int    `yaml:"default_port"`
+	Editor          string `yaml:"editor" mapstructure:"editor"`
+	Theme           string `yaml:"theme" mapstructure:"theme"`
+	ShowHiddenFiles string `yaml:"show_hidden_files" mapstructure:"show_hidden_files"`
+	ConfirmDelete   string `yaml:"confirm_delete" mapstructure:"confirm_delete"`
+	DefaultPort     int    `yaml:"default_port" mapstructure:"default_port"`
 }
 
 // Connection repesents a sing SSH/SFTP connection.
 type Connection struct {
-	ID           string `yaml:"id"`
-	Label        string `yaml:"label"`
-	Icon         string `yaml:"icon"`
-	Host         string `yaml:"host"`
-	Port         int    `yaml:"port"`
-	Username     string `yaml:"username"`
-	AuthType     string `yaml:"auth_type"`     // "password" | "key" | "credential"
-	CredentialID string `yaml:"credential_id"` // if using shared credential
-	KeyPath      string `yaml:"key_path"`      // if using SSH key
+	ID           string `yaml:"id" mapstructure:"id"`
+	Label        string `yaml:"label" mapstructure:"label"`
+	Icon         string `yaml:"icon" mapstructure:"icon"`
+	Host         string `yaml:"host" mapstructure:"host"`
+	Port         int    `yaml:"port" mapstructure:"port"`
+	Username     string `yaml:"username" mapstructure:"username"`
+	AuthType     string `yaml:"auth_type" mapstructure:"auth_type"`           // "password" | "key" | "credential"
+	CredentialID string `yaml:"credential_id" mapstructure:"credential_id"` // if using shared credential
+	KeyPath      string `yaml:"key_path" mapstructure:"key_path"`           // if using SSH key
 }
 
 // Credential represents shared authentication details.
 type Credential struct {
-	ID       string `yaml:"id"`
-	Label    string `yaml:"label"`
-	Username string `yaml:"username"`
+	ID       string `yaml:"id" mapstructure:"id"`
+	Label    string `yaml:"label" mapstructure:"label"`
+	Username string `yaml:"username" mapstructure:"username"`
 	// Password stored in OS keyring; not in config file
 }
 

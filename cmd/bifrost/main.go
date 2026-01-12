@@ -14,6 +14,7 @@ import (
 	"github.com/steevenmentech/bifrost/internal/tui"
 	"github.com/steevenmentech/bifrost/internal/tui/keys"
 	"github.com/steevenmentech/bifrost/internal/tui/views"
+	"golang.org/x/term"
 )
 
 func main() {
@@ -87,14 +88,45 @@ func main() {
 	}
 }
 
-// getConnectionPassword retrieves password based on auth type
+// getConnectionPassword retrieves password based on auth type, prompts if not found
 func getConnectionPassword(conn config.Connection) (string, error) {
+	var password string
+	var err error
+
 	if conn.AuthType == "credential" && conn.CredentialID != "" {
 		// Get password from credential
-		return keyring.GetCredentialPassword(conn.CredentialID)
+		password, err = keyring.GetCredentialPassword(conn.CredentialID)
+	} else {
+		// Get password from connection
+		password, err = keyring.GetConnectionPassword(conn.ID)
 	}
-	// Get password from connection
-	return keyring.GetConnectionPassword(conn.ID)
+
+	// If password not found, prompt user
+	if err != nil {
+		fmt.Printf("Password for %s@%s: ", conn.Username, conn.Host)
+		// Read password (hidden input)
+		passwordBytes, readErr := term.ReadPassword(int(os.Stdin.Fd()))
+		fmt.Println() // New line after password input
+		if readErr != nil {
+			return "", fmt.Errorf("failed to read password: %w", readErr)
+		}
+		password = string(passwordBytes)
+
+		// Offer to save password
+		fmt.Print("Save password to keyring? (y/n): ")
+		var save string
+		fmt.Scanln(&save)
+		if save == "y" || save == "Y" {
+			if conn.AuthType == "credential" && conn.CredentialID != "" {
+				_ = keyring.SetCredentialPassword(conn.CredentialID, password)
+			} else {
+				_ = keyring.SetConnectionPassword(conn.ID, password)
+			}
+			fmt.Println("Password saved!")
+		}
+	}
+
+	return password, nil
 }
 
 // startSSHSession connects to a server via SSH

@@ -38,6 +38,11 @@ type Model struct {
 	credentialsManager *views.CredentialsManagerModel
 	selectedConnection *config.Connection
 	menuSelection      int // 0=SSH, 1=SFTP
+
+	// Confirmation modal
+	confirmationModal    *views.ConfirmationModalModel
+	showingConfirmation  bool
+	confirmationCallback func() (Model, tea.Cmd) // Called when user confirms
 }
 
 // New creates a new TUI model
@@ -66,9 +71,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.ready = true
+
+		// Pass window size to credentials manager if active
+		if m.state == ViewCredentials && m.credentialsManager != nil {
+			updatedManager, cmd := m.credentialsManager.Update(msg)
+			m.credentialsManager = updatedManager
+			return m, cmd
+		}
+
 		return m, nil
 
 	case tea.KeyMsg:
+		// If showing confirmation modal, handle it first
+		if m.showingConfirmation && m.confirmationModal != nil {
+			return m.updateConfirmationModal(msg)
+		}
+
 		// Global keys that work everywhere
 		switch msg.String() {
 		case "ctrl+c", "q":
@@ -224,6 +242,42 @@ func (m Model) updateConnectionsList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// updateConfirmationModal handles updates for the confirmation modal
+func (m Model) updateConfirmationModal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.confirmationModal == nil {
+		m.showingConfirmation = false
+		return m, nil
+	}
+
+	// Update the modal
+	updatedModal, cmd := m.confirmationModal.Update(msg)
+	m.confirmationModal = &updatedModal
+
+	// Check if user confirmed
+	if m.confirmationModal.IsConfirmed() {
+		m.showingConfirmation = false
+		m.confirmationModal = nil
+
+		// Execute the callback if set
+		if m.confirmationCallback != nil {
+			callback := m.confirmationCallback
+			m.confirmationCallback = nil
+			return callback()
+		}
+		return m, nil
+	}
+
+	// Check if user cancelled
+	if m.confirmationModal.IsCancelled() {
+		m.showingConfirmation = false
+		m.confirmationModal = nil
+		m.confirmationCallback = nil
+		return m, nil
+	}
+
+	return m, cmd
+}
+
 // updateCredentialsManager handles updates for the credentials manager
 func (m Model) updateCredentialsManager(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.credentialsManager == nil {
@@ -250,6 +304,7 @@ func (m Model) updateCredentialsManager(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // showCredentialsManager switches to the credentials manager view
 func (m Model) showCredentialsManager() (tea.Model, tea.Cmd) {
 	manager := views.NewCredentialsManager(m.config, m.keys)
+	manager.SetSize(m.width, m.height)
 	m.credentialsManager = manager
 	m.state = ViewCredentials
 	return m, manager.Init()
@@ -310,7 +365,7 @@ func (m Model) showEditConnectionForm() (tea.Model, tea.Cmd) {
 	return m, form.Init()
 }
 
-// handleDeleteConnection deletes the selected connection
+// handleDeleteConnection shows confirmation modal for deleting connection
 func (m Model) handleDeleteConnection() (tea.Model, tea.Cmd) {
 	if m.selectedIndex >= len(m.config.Connections) {
 		return m, nil
@@ -318,23 +373,38 @@ func (m Model) handleDeleteConnection() (tea.Model, tea.Cmd) {
 
 	conn := m.config.Connections[m.selectedIndex]
 
-	// Delete password from keyring
-	_ = keyring.DeleteConnectionPassword(conn.ID)
+	// Show confirmation modal
+	modal := views.NewConfirmationModal(
+		"Delete Connection",
+		fmt.Sprintf("Are you sure you want to delete '%s'?", conn.Label),
+	)
+	m.confirmationModal = &modal
+	m.showingConfirmation = true
 
-	// Delete from config
-	err := m.config.DeleteConnection(conn.ID)
-	if err != nil {
-		m.err = fmt.Errorf("failed to delete connection: %w", err)
+	// Set callback for when user confirms
+	m.confirmationCallback = func() (Model, tea.Cmd) {
+		conn := m.config.Connections[m.selectedIndex]
+
+		// Delete password from keyring
+		_ = keyring.DeleteConnectionPassword(conn.ID)
+
+		// Delete from config
+		err := m.config.DeleteConnection(conn.ID)
+		if err != nil {
+			m.err = fmt.Errorf("failed to delete connection: %w", err)
+			return m, nil
+		}
+
+		// Adjust selection
+		if m.selectedIndex >= len(m.config.Connections) && m.selectedIndex > 0 {
+			m.selectedIndex--
+		}
+
+		m.err = nil
 		return m, nil
 	}
 
-	// Adjust selection
-	if m.selectedIndex >= len(m.config.Connections) && m.selectedIndex > 0 {
-		m.selectedIndex--
-	}
-
-	m.err = nil
-	return m, nil
+	return m, modal.Init()
 }
 
 // handleConnectionSelect is called when user presses Enter on a connection
@@ -382,37 +452,56 @@ func (m Model) View() string {
 	)
 }
 
-// renderTitle renders the title bar
+// renderTitle renders the title bar with ASCII logo
 func (m Model) renderTitle() string {
-	title := styles.TitleStyle.Render("🌈 Bifrost - SSH & SFTP Manager")
+	// Use compact logo or full logo based on width
+	var logo string
+	if m.width < 60 {
+		logo = styles.LogoCompact
+	} else {
+		logo = styles.Logo
+	}
 
-	// Add view indicator
+	styledLogo := styles.LogoStyle.Render(logo)
+
+	// Add view indicator below
 	viewName := m.getViewName()
-	viewIndicator := styles.SubtleStyle.Render(fmt.Sprintf(" [%s]", viewName))
+	viewIndicator := styles.SubtleStyle.Render(fmt.Sprintf("[%s]", viewName))
 
-	return lipgloss.JoinHorizontal(lipgloss.Top, title, viewIndicator)
+	return lipgloss.JoinVertical(lipgloss.Left, styledLogo, viewIndicator)
 }
 
 // renderContent renders the main content area
 func (m Model) renderContent() string {
+	var baseContent string
+
 	switch m.state {
 	case ViewConnections:
-		return m.renderConnectionsList()
+		baseContent = m.renderConnectionsList()
 	case ViewConnectionForm:
 		if m.form != nil {
-			return m.form.View()
+			baseContent = m.form.View()
+		} else {
+			baseContent = "Loading form..."
 		}
-		return "Loading form..."
 	case ViewSelectionMenu:
-		return m.renderSelectionMenu()
+		baseContent = m.renderSelectionMenu()
 	case ViewCredentials:
 		if m.credentialsManager != nil {
-			return m.credentialsManager.View()
+			baseContent = m.credentialsManager.View()
+		} else {
+			baseContent = "Loading credentials..."
 		}
-		return "Loading credentials..."
 	default:
-		return "View not implemented yet"
+		baseContent = "View not implemented yet"
 	}
+
+	// If showing confirmation modal, overlay it on top
+	if m.showingConfirmation && m.confirmationModal != nil {
+		return m.renderConfirmationModal(baseContent)
+	}
+
+	return baseContent
 }
 
 // renderConnectionsList renders the connections list view
@@ -427,7 +516,7 @@ func (m Model) renderConnectionsList() string {
 	for i, conn := range m.config.Connections {
 		icon := conn.Icon
 		if icon == "" {
-			icon = "🖥️"
+			icon = "\uf233" // Nerd Font server icon
 		}
 
 		line := fmt.Sprintf("  %s  %s", icon, conn.Label)
@@ -453,39 +542,90 @@ func (m Model) renderConnectionsList() string {
 	return content
 }
 
-// renderSelectionMenu renders the SSH/SFTP selection menu
+// renderConfirmationModal renders the confirmation modal centered over base content
+func (m Model) renderConfirmationModal(baseContent string) string {
+	if m.confirmationModal == nil {
+		return baseContent
+	}
+
+	modal := m.confirmationModal.View()
+
+	// Center the modal on screen
+	return lipgloss.Place(
+		m.width,
+		m.height-15, // Account for title and status bar
+		lipgloss.Center,
+		lipgloss.Center,
+		modal,
+		lipgloss.WithWhitespaceChars(" "),
+		lipgloss.WithWhitespaceForeground(styles.Dim),
+	)
+}
+
+// renderSelectionMenu renders a floating modal for SSH/SFTP selection
 func (m Model) renderSelectionMenu() string {
 	if m.selectedConnection == nil {
 		return "Error: No connection selected"
 	}
 
-	var content string
-	content += "\n\n"
-	content += styles.TitleStyle.Render(fmt.Sprintf("  Connect to: %s", m.selectedConnection.Label)) + "\n\n"
-	content += "  Choose connection type:\n\n"
+	// Build modal content
+	title := styles.ModalTitleStyle.Render(fmt.Sprintf("Connect to: %s", m.selectedConnection.Label))
 
 	// SSH option
-	sshText := "  🔐  SSH Terminal"
+	sshText := " >_  SSH Terminal"
 	if m.menuSelection == 0 {
 		sshText = styles.SelectedStyle.Render(sshText)
 	} else {
 		sshText = styles.ItemStyle.Render(sshText)
 	}
-	content += sshText + "\n"
 
 	// SFTP option
-	sftpText := "  📁  SFTP File Browser"
+	sftpText := " 📁  SFTP Browser"
 	if m.menuSelection == 1 {
 		sftpText = styles.SelectedStyle.Render(sftpText)
 	} else {
 		sftpText = styles.ItemStyle.Render(sftpText)
 	}
-	content += sftpText + "\n"
 
-	content += "\n\n"
-	content += styles.SubtleStyle.Render("  ↑↓/jk to navigate • enter to select • esc to cancel")
+	help := styles.SubtleStyle.Render("↑↓ navigate • enter select • esc cancel")
 
-	return content
+	modalContent := lipgloss.JoinVertical(lipgloss.Left,
+		title,
+		"",
+		sshText,
+		sftpText,
+		"",
+		help,
+	)
+
+	// Style the modal
+	modal := styles.ModalStyle.Render(modalContent)
+
+	// Center the modal on screen
+	modalWidth := lipgloss.Width(modal)
+	modalHeight := lipgloss.Height(modal)
+
+	// Calculate position to center
+	x := (m.width - modalWidth) / 2
+	y := (m.height - modalHeight) / 3 // Slightly above center
+
+	if x < 0 {
+		x = 0
+	}
+	if y < 0 {
+		y = 0
+	}
+
+	// Place modal over background (positioned higher)
+	return lipgloss.Place(
+		m.width,
+		m.height-15, // Account for title and status bar, push modal up
+		lipgloss.Center,
+		lipgloss.Top,
+		modal,
+		lipgloss.WithWhitespaceChars(" "),
+		lipgloss.WithWhitespaceForeground(styles.Dim),
+	)
 }
 
 // ensureValidSelection makes sure selectedIndex is within bounds

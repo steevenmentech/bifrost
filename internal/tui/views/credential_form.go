@@ -247,6 +247,11 @@ func (m CredentialFormModel) submit() (CredentialFormModel, tea.Cmd) {
 		m.err = fmt.Errorf("username is required")
 		return m, nil
 	}
+	// Password required for new credentials
+	if m.mode == FormModeAdd && m.inputs[CredFieldPassword].Value() == "" {
+		m.err = fmt.Errorf("password is required")
+		return m, nil
+	}
 
 	m.submitted = true
 	return m, nil

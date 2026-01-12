@@ -81,7 +81,7 @@ func NewConnectionForm(mode FormMode, conn *config.Connection) ConnectionFormMod
 func NewConnectionFormWithCredentials(mode FormMode, conn *config.Connection, credentials []config.Credential) ConnectionFormModel {
 	m := ConnectionFormModel{
 		mode:        mode,
-		icons:       []string{"", "", "", "🖥️"},
+		icons:       []string{"\uf179", "\uf17c", "\uf17a", "\uf233"},  // Nerd Font: Apple, Linux, Windows, Server
 		iconLabels:  []string{"Apple", "Linux", "Windows", "Server"},
 		iconIndex:   3,
 		authTypes:   []string{"Password", "Credential"},

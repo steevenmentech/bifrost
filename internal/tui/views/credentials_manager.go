@@ -5,6 +5,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/steevenmentech/bifrost/internal/config"
 	"github.com/steevenmentech/bifrost/internal/keyring"
 	"github.com/steevenmentech/bifrost/internal/tui/keys"
@@ -17,9 +18,15 @@ type CredentialsManagerModel struct {
 	keys          keys.KeyMap
 	selectedIndex int
 	err           error
+	width         int
+	height        int
 
 	// Form for add/edit
 	form *CredentialFormModel
+
+	// Confirmation modal
+	confirmationModal   *ConfirmationModalModel
+	showingConfirmation bool
 
 	// State
 	showingForm bool
@@ -43,7 +50,17 @@ func (m *CredentialsManagerModel) Init() tea.Cmd {
 // Update handles messages
 func (m *CredentialsManagerModel) Update(msg tea.Msg) (*CredentialsManagerModel, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+		return m, nil
+
 	case tea.KeyMsg:
+		// If showing confirmation modal, handle it first
+		if m.showingConfirmation && m.confirmationModal != nil {
+			return m.updateConfirmationModal(msg)
+		}
+
 		// If showing form, delegate to form
 		if m.showingForm && m.form != nil {
 			return m.updateForm(msg)
@@ -81,7 +98,7 @@ func (m *CredentialsManagerModel) Update(msg tea.Msg) (*CredentialsManagerModel,
 
 		case key.Matches(msg, m.keys.Delete):
 			if len(m.config.Credentials) > 0 {
-				return m.deleteCredential()
+				return m.showDeleteConfirmation()
 			}
 			return m, nil
 		}
@@ -140,15 +157,19 @@ func (m *CredentialsManagerModel) handleFormSubmit() (*CredentialsManagerModel, 
 	cred := m.form.GetCredential()
 	password := m.form.GetPassword()
 
-	// Save password to keyring if provided
+	// Save password to keyring
 	if password != "" {
 		err := keyring.SetCredentialPassword(cred.ID, password)
 		if err != nil {
-			m.err = fmt.Errorf("failed to save password: %w", err)
+			m.err = fmt.Errorf("failed to save password to keyring: %w", err)
 			m.showingForm = false
 			m.form = nil
 			return m, nil
 		}
+	} else if m.formMode == FormModeAdd {
+		// Password is required for new credentials
+		m.err = fmt.Errorf("password is required for new credential")
+		return m, nil
 	}
 
 	// Add or update credential in config
@@ -215,6 +236,19 @@ func (m *CredentialsManagerModel) View() string {
 		return m.form.View()
 	}
 
+	content := m.renderContent()
+
+	// If showing confirmation modal, render it centered
+	if m.showingConfirmation && m.confirmationModal != nil {
+		return m.renderConfirmationModal(content)
+	}
+
+	return content
+}
+
+// renderContent renders the main credentials list content
+func (m *CredentialsManagerModel) renderContent() string {
+
 	var s string
 	s += styles.TitleStyle.Render("🔑 Credentials Manager") + "\n\n"
 
@@ -251,6 +285,26 @@ func (m *CredentialsManagerModel) View() string {
 	return s
 }
 
+// renderConfirmationModal renders the confirmation modal centered over base content
+func (m *CredentialsManagerModel) renderConfirmationModal(baseContent string) string {
+	if m.confirmationModal == nil {
+		return baseContent
+	}
+
+	modal := m.confirmationModal.View()
+
+	// Center the modal on screen
+	return lipgloss.Place(
+		m.width,
+		m.height-15, // Account for title and status bar
+		lipgloss.Center,
+		lipgloss.Center,
+		modal,
+		lipgloss.WithWhitespaceChars(" "),
+		lipgloss.WithWhitespaceForeground(styles.Dim),
+	)
+}
+
 // IsDone returns whether the user wants to exit
 func (m *CredentialsManagerModel) IsDone() bool {
 	return m.done
@@ -259,4 +313,40 @@ func (m *CredentialsManagerModel) IsDone() bool {
 // GetConfig returns the current config
 func (m *CredentialsManagerModel) GetConfig() *config.Config {
 	return m.config
+}
+
+// SetSize sets the width and height of the view
+func (m *CredentialsManagerModel) SetSize(width, height int) {
+	m.width = width
+	m.height = height
+}
+
+func (m *CredentialsManagerModel) showDeleteConfirmation() (*CredentialsManagerModel, tea.Cmd) {
+	cred := m.config.Credentials[m.selectedIndex]
+	message := fmt.Sprintf("Are you sure you want to delete the credential '%s'?", cred.Label)
+	modal := NewConfirmationModal("Delete Credential", message)
+	m.confirmationModal = &modal
+	m.showingConfirmation = true
+	return m, m.confirmationModal.Init()
+}
+
+func (m *CredentialsManagerModel) updateConfirmationModal(msg tea.KeyMsg) (*CredentialsManagerModel, tea.Cmd) {
+	updatedModal, cmd := m.confirmationModal.Update(msg)
+	m.confirmationModal = &updatedModal
+
+	if m.confirmationModal.IsConfirmed() {
+		// User confirmed deletion
+		m.showingConfirmation = false
+		m.confirmationModal = nil
+		return m.deleteCredential()
+	}
+
+	// If cancelled, just hide the modal
+	if msg.String() == "esc" || m.confirmationModal.cancelled {
+		m.showingConfirmation = false
+		m.confirmationModal = nil
+		return m, nil
+	}
+
+	return m, cmd
 }
