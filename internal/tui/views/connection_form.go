@@ -81,7 +81,7 @@ func NewConnectionForm(mode FormMode, conn *config.Connection) ConnectionFormMod
 func NewConnectionFormWithCredentials(mode FormMode, conn *config.Connection, credentials []config.Credential) ConnectionFormModel {
 	m := ConnectionFormModel{
 		mode:        mode,
-		icons:       []string{"\uf179", "\uf17c", "\uf17a", "\uf233"},  // Nerd Font: Apple, Linux, Windows, Server
+		icons:       []string{"\uf179", "\uf17c", "\uf17a", "\uf233"}, // Nerd Font: Apple, Linux, Windows, Server
 		iconLabels:  []string{"Apple", "Linux", "Windows", "Server"},
 		iconIndex:   3,
 		authTypes:   []string{"Password", "Credential"},
@@ -309,7 +309,7 @@ func (m ConnectionFormModel) View() string {
 
 	// Help text
 	s += "\n\n"
-	s += styles.HelpStyle.Render("tab/↑↓ navigate • ←→ select • enter submit • esc cancel")
+	s += styles.HelpStyle.Render("Navigate: tab/↑↓ | Select: ←→ | Submit: enter | Cancel: esc")
 
 	// Error message
 	if m.err != nil {

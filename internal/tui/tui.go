@@ -480,7 +480,17 @@ func (m Model) renderContent() string {
 		baseContent = m.renderConnectionsList()
 	case ViewConnectionForm:
 		if m.form != nil {
-			baseContent = m.form.View()
+			// Center the form like a modal
+			formContent := m.form.View()
+			return lipgloss.Place(
+				m.width,
+				m.height-15,
+				lipgloss.Center,
+				lipgloss.Center,
+				formContent,
+				lipgloss.WithWhitespaceChars(" "),
+				lipgloss.WithWhitespaceForeground(styles.Dim),
+			)
 		} else {
 			baseContent = "Loading form..."
 		}

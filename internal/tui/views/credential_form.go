@@ -161,7 +161,7 @@ func (m CredentialFormModel) View() string {
 
 	// Help text
 	s += "\n\n"
-	s += styles.HelpStyle.Render("tab/shift+tab navigate • enter submit • esc cancel")
+	s += styles.HelpStyle.Render("Navigate: tab/shift+tab | Submit: enter | Cancel: esc")
 
 	// Error message
 	if m.err != nil {

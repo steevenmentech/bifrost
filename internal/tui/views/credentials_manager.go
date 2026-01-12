@@ -231,9 +231,18 @@ func (m *CredentialsManagerModel) deleteCredential() (*CredentialsManagerModel, 
 
 // View renders the credentials manager
 func (m *CredentialsManagerModel) View() string {
-	// If showing form, render form
+	// If showing form, render form centered
 	if m.showingForm && m.form != nil {
-		return m.form.View()
+		formContent := m.form.View()
+		return lipgloss.Place(
+			m.width,
+			m.height-15,
+			lipgloss.Center,
+			lipgloss.Center,
+			formContent,
+			lipgloss.WithWhitespaceChars(" "),
+			lipgloss.WithWhitespaceForeground(styles.Dim),
+		)
 	}
 
 	content := m.renderContent()
