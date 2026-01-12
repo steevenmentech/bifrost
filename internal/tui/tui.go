@@ -572,7 +572,7 @@ func (m Model) renderSelectionMenu() string {
 	title := styles.ModalTitleStyle.Render(fmt.Sprintf("Connect to: %s", m.selectedConnection.Label))
 
 	// SSH option
-	sshText := " >_  SSH Terminal"
+	sshText := " \uf120  SSH Terminal"
 	if m.menuSelection == 0 {
 		sshText = styles.SelectedStyle.Render(sshText)
 	} else {
@@ -580,7 +580,7 @@ func (m Model) renderSelectionMenu() string {
 	}
 
 	// SFTP option
-	sftpText := " 📁  SFTP Browser"
+	sftpText := " \uf07c  SFTP Browser"
 	if m.menuSelection == 1 {
 		sftpText = styles.SelectedStyle.Render(sftpText)
 	} else {
@@ -646,7 +646,7 @@ func (m *Model) ensureValidSelection() {
 
 // renderStatusBar renders the bottom status bar
 func (m Model) renderStatusBar() string {
-	helpText := "↑↓/jk navigate • enter select • a add • e edit • d delete • c credentials • q quit"
+	helpText := "Navigate: ↑↓/jk | Select: enter | Add: a | Edit: e | Delete: d | Credentials: c | Quit: q"
 
 	statusText := styles.HelpStyle.Render(helpText)
 

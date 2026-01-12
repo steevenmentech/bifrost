@@ -280,7 +280,7 @@ func (m *CredentialsManagerModel) renderContent() string {
 
 	// Help text
 	s += "\n\n"
-	s += styles.HelpStyle.Render("  ↑↓/jk navigate • a add • e edit • d delete • esc back")
+	s += styles.HelpStyle.Render("  Navigate: ↑↓/jk | Add: a | Edit: e | Delete: d | Back: esc")
 
 	return s
 }

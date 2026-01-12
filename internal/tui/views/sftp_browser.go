@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/steevenmentech/bifrost/internal/sftp"
 	"github.com/steevenmentech/bifrost/internal/tui/keys"
 	"github.com/steevenmentech/bifrost/internal/tui/styles"
@@ -29,6 +30,7 @@ type SFTPBrowserModel struct {
 	client        *sftp.Client
 	files         []sftp.FileInfo
 	selectedIndex int
+	scrollOffset  int // First visible file index for scrolling
 	currentPath   string
 	state         SFTPBrowserState
 	pathInput     textinput.Model
@@ -44,9 +46,9 @@ type SFTPBrowserModel struct {
 
 func NewSFTPBrowser(client *sftp.Client, keymap keys.KeyMap) *SFTPBrowserModel {
 	pathInput := textinput.New()
-	pathInput.Placeholder = "/path/to/directory"
+	pathInput.Placeholder = "Enter path..."
 	pathInput.CharLimit = 256
-	pathInput.Width = 50
+	pathInput.Width = 100 // Will be adjusted on first WindowSizeMsg
 
 	nameInput := textinput.New()
 	nameInput.Placeholder = "filename"
@@ -94,6 +96,9 @@ func (m *SFTPBrowserModel) loadCurrentDirectory() {
 	if m.selectedIndex >= len(m.files) {
 		m.selectedIndex = 0
 	}
+
+	// Reset scroll
+	m.scrollOffset = 0
 }
 
 func (m *SFTPBrowserModel) Init() tea.Cmd {
@@ -101,6 +106,18 @@ func (m *SFTPBrowserModel) Init() tea.Cmd {
 }
 
 func (m *SFTPBrowserModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// Handle window size for all states
+	if msg, ok := msg.(tea.WindowSizeMsg); ok {
+		m.width = msg.Width
+		m.height = msg.Height
+
+		// Adjust path input width based on terminal width
+		// Account for: left margin (2) + right margin (2) + border (2) + padding (2) + icon (3) = 11 chars
+		m.pathInput.Width = max(30, msg.Width-11)
+
+		return m, nil
+	}
+
 	switch m.state {
 	case GoToPathState:
 		return m.updateGoToPath(msg)
@@ -124,20 +141,41 @@ func (m *SFTPBrowserModel) updateBrowsing(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, m.keys.Up):
 			if m.selectedIndex > 0 {
 				m.selectedIndex--
+				m.adjustScroll()
 			}
 		case key.Matches(msg, m.keys.Down):
 			if m.selectedIndex < len(m.files)-1 {
 				m.selectedIndex++
+				m.adjustScroll()
 			}
-		case key.Matches(msg, m.keys.Left): // h - parent directory
-			m.goToParentDirectory()
-		case key.Matches(msg, m.keys.Right), msg.String() == "enter": // l or Enter
-			m.enterSelected()
-		case msg.String() == "g": // Go to path
+		case msg.String() == "ctrl+u": // Page up (half page)
+			visibleCount := m.getVisibleFileCount()
+			jump := max(1, visibleCount/2)
+			m.selectedIndex -= jump
+			m.selectedIndex = max(0, m.selectedIndex)
+			m.adjustScroll()
+		case msg.String() == "ctrl+d": // Page down (half page)
+			visibleCount := m.getVisibleFileCount()
+			jump := max(1, visibleCount/2)
+			m.selectedIndex += jump
+			if m.selectedIndex >= len(m.files) {
+				m.selectedIndex = len(m.files) - 1
+			}
+			m.adjustScroll()
+		case msg.String() == "G": // Go to bottom
+			if len(m.files) > 0 {
+				m.selectedIndex = len(m.files) - 1
+				m.adjustScroll()
+			}
+		case msg.String() == "g", msg.String() == "tab": // Go to path (inline)
 			m.state = GoToPathState
 			m.pathInput.SetValue(m.currentPath)
 			m.pathInput.Focus()
 			return m, textinput.Blink
+		case key.Matches(msg, m.keys.Left): // h - parent directory
+			m.goToParentDirectory()
+		case key.Matches(msg, m.keys.Right), msg.String() == "enter": // l or Enter
+			m.enterSelected()
 		case msg.String() == "~": // Go to home
 			m.currentPath = "~"
 			m.loadCurrentDirectory()
@@ -392,6 +430,45 @@ func (m *SFTPBrowserModel) copyToClipboard(text string) {
 	}
 }
 
+// adjustScroll adjusts the scroll offset to keep the selected item visible
+func (m *SFTPBrowserModel) adjustScroll() {
+	visibleLines := m.getVisibleFileCount()
+	if visibleLines <= 0 {
+		return
+	}
+
+	// If selected item is above the visible area, scroll up
+	if m.selectedIndex < m.scrollOffset {
+		m.scrollOffset = m.selectedIndex
+	}
+
+	// If selected item is below the visible area, scroll down
+	if m.selectedIndex >= m.scrollOffset+visibleLines {
+		m.scrollOffset = m.selectedIndex - visibleLines + 1
+	}
+}
+
+// getVisibleFileCount calculates how many files can fit in the viewport
+func (m *SFTPBrowserModel) getVisibleFileCount() int {
+	// Reserve space for:
+	// - 2 lines for title + newline
+	// - 3 lines for search box (top border, content, bottom border)
+	// - 1 line for help text under search box (if in edit mode)
+	// - 1 line for spacing
+	// - 3 lines for help keys at bottom
+	// - 2 lines for spacing/margins
+	reservedLines := 12
+	if m.err != nil || m.successMsg != "" {
+		reservedLines += 2
+	}
+
+	availableLines := m.height - reservedLines
+	if availableLines < 1 {
+		return 1
+	}
+	return availableLines
+}
+
 // GetFileToEdit returns the path of the file to edit (if any)
 func (m *SFTPBrowserModel) GetFileToEdit() string {
 	return m.fileToEdit
@@ -399,8 +476,6 @@ func (m *SFTPBrowserModel) GetFileToEdit() string {
 
 func (m *SFTPBrowserModel) View() string {
 	switch m.state {
-	case GoToPathState:
-		return m.viewGoToPath()
 	case CreateFileState:
 		return m.viewCreateFile()
 	case CreateDirState:
@@ -410,17 +485,9 @@ func (m *SFTPBrowserModel) View() string {
 	case DeleteConfirmState:
 		return m.viewDeleteConfirm()
 	default:
+		// GoToPathState and BrowsingState use the same view (inline editing)
 		return m.viewBrowsing()
 	}
-}
-
-func (m *SFTPBrowserModel) viewGoToPath() string {
-	var s strings.Builder
-	s.WriteString("\n")
-	s.WriteString(styles.TitleStyle.Render("  Go to path") + "\n\n")
-	s.WriteString("  " + m.pathInput.View() + "\n\n")
-	s.WriteString(styles.SubtleStyle.Render("  enter to navigate • esc to cancel") + "\n")
-	return s.String()
 }
 
 func (m *SFTPBrowserModel) viewCreateFile() string {
@@ -428,7 +495,7 @@ func (m *SFTPBrowserModel) viewCreateFile() string {
 	s.WriteString("\n")
 	s.WriteString(styles.TitleStyle.Render("  Create new file") + "\n\n")
 	s.WriteString("  " + m.nameInput.View() + "\n\n")
-	s.WriteString(styles.SubtleStyle.Render("  enter to create • esc to cancel") + "\n")
+	s.WriteString(styles.SubtleStyle.Render("  Create: enter | Cancel: esc") + "\n")
 	return s.String()
 }
 
@@ -437,7 +504,7 @@ func (m *SFTPBrowserModel) viewCreateDir() string {
 	s.WriteString("\n")
 	s.WriteString(styles.TitleStyle.Render("  Create new directory") + "\n\n")
 	s.WriteString("  " + m.nameInput.View() + "\n\n")
-	s.WriteString(styles.SubtleStyle.Render("  enter to create • esc to cancel") + "\n")
+	s.WriteString(styles.SubtleStyle.Render("  Create: enter | Cancel: esc") + "\n")
 	return s.String()
 }
 
@@ -450,7 +517,7 @@ func (m *SFTPBrowserModel) viewRename() string {
 		s.WriteString(styles.TitleStyle.Render("  Rename") + "\n\n")
 	}
 	s.WriteString("  " + m.nameInput.View() + "\n\n")
-	s.WriteString(styles.SubtleStyle.Render("  enter to rename • esc to cancel") + "\n")
+	s.WriteString(styles.SubtleStyle.Render("  Rename: enter | Cancel: esc") + "\n")
 	return s.String()
 }
 
@@ -464,7 +531,7 @@ func (m *SFTPBrowserModel) viewDeleteConfirm() string {
 		}
 		s.WriteString(styles.TitleStyle.Render(fmt.Sprintf("  Delete %s: %s", itemType, m.files[m.selectedIndex].Name)) + "\n\n")
 		s.WriteString("  Are you sure? This action cannot be undone.\n\n")
-		s.WriteString(styles.SubtleStyle.Render("  y to confirm • n/esc to cancel") + "\n")
+		s.WriteString(styles.SubtleStyle.Render("  Confirm: y | Cancel: n/esc") + "\n")
 	}
 	return s.String()
 }
@@ -472,10 +539,70 @@ func (m *SFTPBrowserModel) viewDeleteConfirm() string {
 func (m *SFTPBrowserModel) viewBrowsing() string {
 	var s strings.Builder
 
-	// Title and breadcrumb
+	// Title
 	s.WriteString("\n")
 	s.WriteString(styles.TitleStyle.Render("  SFTP Browser") + "\n")
-	s.WriteString(styles.SubtleStyle.Render("  "+m.renderBreadcrumb()) + "\n\n")
+
+	// Always show path in a search box style
+	var pathContent string
+	var helpText string
+	var icon string
+
+	if m.state == GoToPathState {
+		// Active input mode - show cursor and editable
+		icon = "\uf002" // Nerd Font: search icon
+		pathContent = m.pathInput.View()
+		helpText = "  " + styles.SubtleStyle.Render("Navigate: enter | Cancel: esc")
+	} else {
+		// Display mode - show current path
+		icon = "\uf07c" // Nerd Font: folder icon
+		pathContent = m.renderBreadcrumb()
+		helpText = ""
+	}
+
+	// Build the search box manually for pixel-perfect alignment
+	// Calculate inner width (terminal - margins - border chars - padding)
+	innerWidth := max(30, m.width-8)
+
+	// Build content with icon and path
+	var content string
+
+	if m.state == GoToPathState {
+		// In edit mode, manually build the line with fixed width
+		inputValue := m.pathInput.Value()
+		cursor := "█" // Simple block cursor
+
+		// Build the full content first
+		content = icon + " > " + inputValue + cursor
+
+		// Calculate visual width and pad to fill
+		visualWidth := lipgloss.Width(content)
+		if visualWidth < innerWidth {
+			content = content + strings.Repeat(" ", innerWidth-visualWidth)
+		}
+	} else {
+		// In display mode, use the content directly
+		content = icon + " " + pathContent
+		visualWidth := lipgloss.Width(content)
+		if visualWidth < innerWidth {
+			content = content + strings.Repeat(" ", innerWidth-visualWidth)
+		}
+	}
+
+	// Draw the box manually with border characters
+	borderColor := styles.Primary
+	topBorder := lipgloss.NewStyle().Foreground(borderColor).Render("╭" + strings.Repeat("─", innerWidth+2) + "╮")
+	bottomBorder := lipgloss.NewStyle().Foreground(borderColor).Render("╰" + strings.Repeat("─", innerWidth+2) + "╯")
+	leftBorder := lipgloss.NewStyle().Foreground(borderColor).Render("│")
+	rightBorder := lipgloss.NewStyle().Foreground(borderColor).Render("│")
+
+	s.WriteString("  " + topBorder + "\n")
+	s.WriteString("  " + leftBorder + " " + content + " " + rightBorder + "\n")
+	s.WriteString("  " + bottomBorder + "\n")
+	if helpText != "" {
+		s.WriteString(helpText + "\n")
+	}
+	s.WriteString("\n")
 
 	// Error display
 	if m.err != nil {
@@ -487,21 +614,40 @@ func (m *SFTPBrowserModel) viewBrowsing() string {
 		s.WriteString(styles.SuccessStyle.Render("  "+m.successMsg) + "\n\n")
 	}
 
-	// File list
+	// File list with scrolling
 	if len(m.files) == 0 {
 		s.WriteString(styles.SubtleStyle.Render("  (empty directory)") + "\n")
 	} else {
-		for i, file := range m.files {
-			line := m.renderFileLine(file, i == m.selectedIndex)
+		visibleCount := m.getVisibleFileCount()
+		endIndex := min(m.scrollOffset+visibleCount, len(m.files))
+
+		// Show indicator if there are files above
+		if m.scrollOffset > 0 {
+			s.WriteString(styles.SubtleStyle.Render(fmt.Sprintf("  ▲ %d more above...", m.scrollOffset)) + "\n")
+		}
+
+		// Render visible files
+		for i := m.scrollOffset; i < endIndex; i++ {
+			line := m.renderFileLine(m.files[i], i == m.selectedIndex)
 			s.WriteString(line + "\n")
+		}
+
+		// Show indicator if there are files below
+		if endIndex < len(m.files) {
+			remaining := len(m.files) - endIndex
+			s.WriteString(styles.SubtleStyle.Render(fmt.Sprintf("  ▼ %d more below...", remaining)) + "\n")
 		}
 	}
 
-	// Help text
+	// Help text footer - lazygit style
 	s.WriteString("\n")
-	helpText := "  j/k: up/down • h: parent • l/enter: open • g: go to path • ~: home • .: toggle hidden\n"
-	helpText += "  n: new file • N: new dir • d: delete • r: rename • e: edit • y: copy path • q: quit"
-	s.WriteString(styles.SubtleStyle.Render(helpText) + "\n")
+
+	// All commands in 2 lines with lazygit-style format
+	helpLine1 := "  Up/Down: j/k | Page: ctrl-u/d | Bottom: G | Parent: h | Open: l/enter | Path: g/tab | Home: ~ | Hidden: ."
+	helpLine2 := "  New file: n | New dir: N | Delete: d | Rename: r | Edit: e | Copy path: y | Quit: q"
+
+	s.WriteString(styles.SubtleStyle.Render(helpLine1) + "\n")
+	s.WriteString(styles.SubtleStyle.Render(helpLine2) + "\n")
 
 	return s.String()
 }
@@ -515,10 +661,10 @@ func (m *SFTPBrowserModel) renderBreadcrumb() string {
 }
 
 func (m *SFTPBrowserModel) renderFileLine(file sftp.FileInfo, isSelected bool) string {
-	// Icon
-	icon := "📄"
+	// Icon (using Nerd Font icons)
+	icon := "\uf15b" // File icon
 	if file.IsDir {
-		icon = "📁"
+		icon = "\uf07c" // Folder icon
 	}
 
 	// Format size

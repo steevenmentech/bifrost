@@ -87,7 +87,7 @@ func (m ConfirmationModalModel) View() string {
 	buttons := lipgloss.JoinHorizontal(lipgloss.Left, yesText, "  ", noText)
 
 	// Help text
-	help := styles.SubtleStyle.Render("←→ select • enter confirm • esc cancel")
+	help := styles.SubtleStyle.Render("Select: ←→ | Confirm: enter | Cancel: esc")
 
 	// Combine all parts
 	content := lipgloss.JoinVertical(lipgloss.Left,
