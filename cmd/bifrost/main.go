@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/steevenmentech/bifrost/internal/config"
@@ -245,7 +246,34 @@ func editRemoteFile(client *sftp.Client, remotePath string) error {
 
 	// Open editor
 	fmt.Printf("Opening %s in %s...\n\n", fileName, editor)
-	cmd := exec.Command(editor, localPath)
+
+	// Parse editor command and arguments
+	// Look for flags starting with " -" to separate command from args
+	var editorCmd string
+	var editorArgs []string
+
+	// Find first occurrence of " -" which usually indicates flags
+	flagIndex := -1
+	for i := 0; i < len(editor)-1; i++ {
+		if editor[i] == ' ' && editor[i+1] == '-' {
+			flagIndex = i
+			break
+		}
+	}
+
+	if flagIndex > 0 {
+		// Split into command and args
+		editorCmd = strings.TrimSpace(editor[:flagIndex])
+		argsStr := strings.TrimSpace(editor[flagIndex:])
+		editorArgs = strings.Fields(argsStr)
+	} else {
+		// No flags found, use entire string as command
+		editorCmd = strings.TrimSpace(editor)
+	}
+
+	// Build command with editor args + file path
+	args := append(editorArgs, localPath)
+	cmd := exec.Command(editorCmd, args...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
