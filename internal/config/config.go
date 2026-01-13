@@ -12,39 +12,39 @@ import (
 
 // Config represents the application configuration.
 type Config struct {
-	Version     int          `yaml:"version"`
-	Settings    Settings     `yaml:"settings"`
-	Connections []Connection `yaml:"connections"`
-	Credentials []Credential `yaml:"credentials"`
+	Version     int          `yaml:"version" mapstructure:"version"`
+	Settings    Settings     `yaml:"settings" mapstructure:"settings"`
+	Connections []Connection `yaml:"connections" mapstructure:"connections"`
+	Credentials []Credential `yaml:"credentials" mapstructure:"credentials"`
 }
 
 // Settings contains user preferences and application settings.
 type Settings struct {
-	Editor          string `yaml:"editor"`
-	Theme           string `yaml:"theme"`
-	ShowHiddenFiles string `yaml:"show_hidden_files"`
-	ConfirmDelete   string `yaml:"confirm_delete"`
-	DefaultPort     int    `yaml:"default_port"`
+	Editor          string `yaml:"editor" mapstructure:"editor"`
+	Theme           string `yaml:"theme" mapstructure:"theme"`
+	ShowHiddenFiles string `yaml:"show_hidden_files" mapstructure:"show_hidden_files"`
+	ConfirmDelete   string `yaml:"confirm_delete" mapstructure:"confirm_delete"`
+	DefaultPort     int    `yaml:"default_port" mapstructure:"default_port"`
 }
 
 // Connection repesents a sing SSH/SFTP connection.
 type Connection struct {
-	ID           string `yaml:"id"`
-	Label        string `yaml:"label"`
-	Icon         string `yaml:"icon"`
-	Host         string `yaml:"host"`
-	Port         int    `yaml:"port"`
-	Username     string `yaml:"username"`
-	AuthType     string `yaml:"auth_type"`     // "password" | "key" | "credential"
-	CredentialID string `yaml:"credential_id"` // if using shared credential
-	KeyPath      string `yaml:"key_path"`      // if using SSH key
+	ID           string `yaml:"id" mapstructure:"id"`
+	Label        string `yaml:"label" mapstructure:"label"`
+	Icon         string `yaml:"icon" mapstructure:"icon"`
+	Host         string `yaml:"host" mapstructure:"host"`
+	Port         int    `yaml:"port" mapstructure:"port"`
+	Username     string `yaml:"username" mapstructure:"username"`
+	AuthType     string `yaml:"auth_type" mapstructure:"auth_type"`           // "password" | "key" | "credential"
+	CredentialID string `yaml:"credential_id" mapstructure:"credential_id"` // if using shared credential
+	KeyPath      string `yaml:"key_path" mapstructure:"key_path"`           // if using SSH key
 }
 
 // Credential represents shared authentication details.
 type Credential struct {
-	ID       string `yaml:"id"`
-	Label    string `yaml:"label"`
-	Username string `yaml:"username"`
+	ID       string `yaml:"id" mapstructure:"id"`
+	Label    string `yaml:"label" mapstructure:"label"`
+	Username string `yaml:"username" mapstructure:"username"`
 	// Password stored in OS keyring; not in config file
 }
 
@@ -163,4 +163,46 @@ func (cfg *Config) GetConnection(id string) (*Connection, error) {
 		}
 	}
 	return nil, fmt.Errorf("connection with ID %s not found", id)
+}
+
+// AddCredential adds a new credential to the configuration
+func (cfg *Config) AddCredential(cred Credential) error {
+	if cred.ID == "" {
+		cred.ID = uuid.New().String()
+	}
+
+	cfg.Credentials = append(cfg.Credentials, cred)
+	return cfg.Save()
+}
+
+// DeleteCredential removes a credential from the configuration by ID
+func (cfg *Config) DeleteCredential(id string) error {
+	for i, cred := range cfg.Credentials {
+		if cred.ID == id {
+			cfg.Credentials = append(cfg.Credentials[:i], cfg.Credentials[i+1:]...)
+			return cfg.Save()
+		}
+	}
+	return fmt.Errorf("credential with ID %s not found", id)
+}
+
+// UpdateCredential updates an existing credential in the configuration
+func (cfg *Config) UpdateCredential(updated Credential) error {
+	for i, cred := range cfg.Credentials {
+		if cred.ID == updated.ID {
+			cfg.Credentials[i] = updated
+			return cfg.Save()
+		}
+	}
+	return fmt.Errorf("credential with ID %s not found", updated.ID)
+}
+
+// GetCredential retrieves a credential by ID
+func (cfg *Config) GetCredential(id string) (*Credential, error) {
+	for _, cred := range cfg.Credentials {
+		if cred.ID == id {
+			return &cred, nil
+		}
+	}
+	return nil, fmt.Errorf("credential with ID %s not found", id)
 }
