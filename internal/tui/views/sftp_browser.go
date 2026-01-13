@@ -2,7 +2,9 @@ package views
 
 import (
 	"fmt"
+	"os"
 	"path"
+	"path/filepath"
 	"strings"
 
 	"github.com/atotto/clipboard"
@@ -218,6 +220,14 @@ func (m *SFTPBrowserModel) updateBrowsing(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, tea.Quit
 				}
 			}
+		case msg.String() == "D": // Download file to ~/Downloads
+			if len(m.files) > 0 && m.selectedIndex < len(m.files) {
+				if !m.files[m.selectedIndex].IsDir {
+					m.downloadSelectedFile()
+				} else {
+					m.err = fmt.Errorf("cannot download directories")
+				}
+			}
 		case key.Matches(msg, m.keys.Quit):
 			return m, tea.Quit
 		}
@@ -427,6 +437,64 @@ func (m *SFTPBrowserModel) copyToClipboard(text string) {
 	err := clipboard.WriteAll(text)
 	if err != nil {
 		m.err = fmt.Errorf("failed to copy to clipboard: %w", err)
+	}
+}
+
+// downloadSelectedFile downloads the selected file to ~/Downloads
+func (m *SFTPBrowserModel) downloadSelectedFile() {
+	if m.selectedIndex >= len(m.files) {
+		return
+	}
+
+	file := m.files[m.selectedIndex]
+	remotePath := path.Join(m.currentPath, file.Name)
+
+	// Get home directory and build Downloads path
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		m.err = fmt.Errorf("failed to get home directory: %w", err)
+		return
+	}
+	downloadsDir := filepath.Join(homeDir, "Downloads")
+
+	// Ensure Downloads directory exists
+	if err := os.MkdirAll(downloadsDir, 0755); err != nil {
+		m.err = fmt.Errorf("failed to create Downloads directory: %w", err)
+		return
+	}
+
+	localPath := filepath.Join(downloadsDir, file.Name)
+
+	// Check if file already exists and add suffix if needed
+	localPath = m.getUniqueFilePath(localPath)
+
+	// Download the file
+	err = m.client.DownloadFile(remotePath, localPath)
+	if err != nil {
+		m.err = fmt.Errorf("download failed: %w", err)
+		return
+	}
+
+	m.successMsg = fmt.Sprintf("Downloaded: %s", filepath.Base(localPath))
+}
+
+// getUniqueFilePath returns a unique file path by adding (1), (2), etc. if file exists
+func (m *SFTPBrowserModel) getUniqueFilePath(originalPath string) string {
+	if _, err := os.Stat(originalPath); os.IsNotExist(err) {
+		return originalPath
+	}
+
+	dir := filepath.Dir(originalPath)
+	ext := filepath.Ext(originalPath)
+	name := strings.TrimSuffix(filepath.Base(originalPath), ext)
+
+	counter := 1
+	for {
+		newPath := filepath.Join(dir, fmt.Sprintf("%s (%d)%s", name, counter, ext))
+		if _, err := os.Stat(newPath); os.IsNotExist(err) {
+			return newPath
+		}
+		counter++
 	}
 }
 
@@ -644,7 +712,7 @@ func (m *SFTPBrowserModel) viewBrowsing() string {
 
 	// All commands in 2 lines with lazygit-style format
 	helpLine1 := "  Up/Down: j/k | Page: ctrl-u/d | Bottom: G | Parent: h | Open: l/enter | Path: g/tab | Home: ~ | Hidden: ."
-	helpLine2 := "  New file: n | New dir: N | Delete: d | Rename: r | Edit: e | Copy path: y | Quit: q"
+	helpLine2 := "  New file: n | New dir: N | Delete: d | Rename: r | Edit: e | Download: D | Copy path: y | Quit: q"
 
 	s.WriteString(styles.SubtleStyle.Render(helpLine1) + "\n")
 	s.WriteString(styles.SubtleStyle.Render(helpLine2) + "\n")
