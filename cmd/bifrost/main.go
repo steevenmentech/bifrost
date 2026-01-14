@@ -172,7 +172,7 @@ func startSFTPSession(conn config.Connection) error {
 	}
 	defer sftpClient.Close()
 
-	fmt.Println("Connected! Loading SFTP browser...\n")
+	fmt.Println("Connected! Loading SFTP browser...")
 
 	// Loop to handle file editing
 	for {
