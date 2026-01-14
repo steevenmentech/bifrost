@@ -1,0 +1,68 @@
+version: 2
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: bifrost
+    main: ./cmd/bifrost
+    binary: bifrost
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
+
+archives:
+  - id: bifrost
+    formats:
+      - tar.gz
+      - zip
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README.md
+      - LICENSE
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: desc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+
+brews:
+  - name: bifrost
+    repository:
+      owner: steevenmentech
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    directory: Formula
+    homepage: "https://github.com/steevenmentech/bifrost"
+    description: "SSH/SFTP Connection Manager"
+    license: "Non-Commercial"
+    install: |
+      bin.install "bifrost"
+    test: |
+      system "#{bin}/bifrost", "--version"
+
+release:
+  github:
+    owner: steevenmentech
+    name: bifrost
+  draft: false
+  prerelease: auto
+  name_template: "v{{ .Version }}"
+
