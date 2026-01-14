@@ -28,6 +28,19 @@
 
 ## Installation
 
+### Homebrew (macOS/Linux)
+
+```bash
+# Add the tap
+brew tap steevenmentech/tap
+
+# Install
+brew install bifrost
+
+# Run
+bifrost
+```
+
 ### From Source
 
 ```bash
@@ -38,21 +51,45 @@ cd bifrost
 # Build
 go build -o bifrost ./cmd/bifrost
 
+# Install (optional)
+sudo mv bifrost /usr/local/bin/
+
 # Run
-./bifrost
+bifrost
+```
+
+### Download Binary
+
+Download the latest release for your platform from [GitHub Releases](https://github.com/steevenmentech/bifrost/releases).
+
+```bash
+# macOS (Apple Silicon)
+curl -LO https://github.com/steevenmentech/bifrost/releases/latest/download/bifrost_*_darwin_arm64.tar.gz
+tar -xzf bifrost_*_darwin_arm64.tar.gz
+sudo mv bifrost /usr/local/bin/
+
+# macOS (Intel)
+curl -LO https://github.com/steevenmentech/bifrost/releases/latest/download/bifrost_*_darwin_amd64.tar.gz
+tar -xzf bifrost_*_darwin_amd64.tar.gz
+sudo mv bifrost /usr/local/bin/
+
+# Linux (x86_64)
+curl -LO https://github.com/steevenmentech/bifrost/releases/latest/download/bifrost_*_linux_amd64.tar.gz
+tar -xzf bifrost_*_linux_amd64.tar.gz
+sudo mv bifrost /usr/local/bin/
 ```
 
 ### Requirements
 
-- Go 1.21 or higher
 - A terminal with Unicode support (recommended: iTerm2, Alacritty, Kitty, Ghostty)
 - Nerd Font for icons (optional but recommended)
+- For building from source: Go 1.21 or higher
 
 ## Usage
 
 ```bash
 # Start Bifrost
-./bifrost
+bifrost
 ```
 
 ## Keyboard Shortcuts
@@ -129,6 +166,16 @@ bifrost/
 - **[Bubbles](https://github.com/charmbracelet/bubbles)** - TUI components
 - **[pkg/sftp](https://github.com/pkg/sftp)** - SFTP client library
 - **[golang.org/x/crypto/ssh](https://pkg.go.dev/golang.org/x/crypto/ssh)** - SSH client library
+
+## Contributing
+
+Contributions are welcome! Please read our [Contributing Guide](CONTRIBUTING.md) for details on:
+
+- Code of Conduct
+- Development setup
+- Commit conventions
+- Pull request process
+- Testing guidelines
 
 ## License
 
