@@ -23,9 +23,16 @@ builds:
       - -X main.date={{.Date}}
 
 archives:
-  - id: bifrost
+  - id: default
     formats:
       - tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README.md
+      - LICENSE
+
+  - id: zip
+    formats:
       - zip
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     files:
@@ -45,6 +52,8 @@ changelog:
 
 brews:
   - name: bifrost
+    ids:
+      - default
     repository:
       owner: steevenmentech
       name: homebrew-tap
